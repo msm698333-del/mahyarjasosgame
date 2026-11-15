@@ -36,6 +36,20 @@ function emitP(socket, ev, data) {
   });
 }
 
+function waitForEvent(socket, ev, ms = 4000) {
+  return new Promise((resolve) => {
+    const h = (d) => {
+      socket.off(ev, h);
+      resolve(d);
+    };
+    socket.on(ev, h);
+    setTimeout(() => {
+      socket.off(ev, h);
+      resolve(null);
+    }, ms);
+  });
+}
+
 function attachBot(socket, bot) {
   socket.on('connect', () => { bot.connected = true; });
   socket.on('disconnect', () => { bot.connected = false; });
@@ -334,6 +348,26 @@ async function main() {
   // تاریخچه
   const hist = await (await fetch(BASE + '/api/history', { headers: { Authorization: 'Bearer ' + bots[0].token } })).json();
   check('match history recorded', hist.ok && hist.history.length >= 1, `rows=${hist.history.length}`);
+
+  // ۸.۵) ویس: سیگنالینگ WebRTC داخل اتاق
+  const b0id = bots[0].me.id, b1id = bots[1].me.id, b2id = bots[2].me.id;
+  const r1 = await emitP(bots[0].socket, 'voice:join', {});
+  check('voice join self (no peers yet)', r1.ok && r1.peers.length === 0);
+  const vj1Ev = waitForEvent(bots[0].socket, 'voice:joined');
+  const r2 = await emitP(bots[1].socket, 'voice:join', {});
+  check('voice join second sees first as peer', r2.ok && r2.peers.length === 1 && r2.peers[0] === b0id, JSON.stringify(r2));
+  const vj1 = await vj1Ev;
+  check('voice:joined broadcast to room', vj1 && vj1.id === b1id, JSON.stringify(vj1));
+  const sigEv = waitForEvent(bots[0].socket, 'voice:signal');
+  const sr = await emitP(bots[1].socket, 'voice:signal', { to: b0id, data: { desc: { type: 'offer', sdp: 'v=0-fake-test' } } });
+  const sig = await sigEv;
+  check('voice signal relayed to target', sr.ok && sig && sig.from === b1id && sig.data && sig.data.desc && sig.data.desc.type === 'offer');
+  const sigBad = await emitP(bots[1].socket, 'voice:signal', { to: b2id, data: { desc: { type: 'offer', sdp: 'x' } } }); // bots[2] در گفتگو نیست
+  check('voice signal to non-voice member rejected', sigBad.ok === false && sigBad.code === 'no_peer', sigBad.code);
+  const vlEv = waitForEvent(bots[0].socket, 'voice:left');
+  await emitP(bots[1].socket, 'voice:leave', {});
+  const vl = await vlEv;
+  check('voice:left broadcast on leave', vl && vl.id === b1id);
 
   // ۹) تست ورود لابی با هزینه (پس از مصرف یک ورود رایگان)
   const freeLeft = bots[0].reg.player.freeEntries - 1; // یکی برای ساخت لابی مصرف شد

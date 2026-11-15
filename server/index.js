@@ -16,6 +16,7 @@ const createEngine = require('./game/engine');
 const createLobby = require('./lobby');
 const createTtt = require('./ttt');
 const attachRealtime = require('./realtime');
+const createVoice = require('./voice');
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -113,6 +114,7 @@ ctx.emit = {
 ctx.engine = createEngine(ctx);
 ctx.lobby = createLobby(ctx);
 ctx.ttt = createTtt(ctx);
+ctx.voice = createVoice(ctx);
 
 // ─── REST API ───
 const httpLimiter = makeLimiter();

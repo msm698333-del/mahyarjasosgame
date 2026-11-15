@@ -54,6 +54,18 @@ function normalizeFa(s) {
     .trim();
 }
 
+// مقایسهٔ دقیق کلمهٔ مخفی (قانون جدید): بدون هیچ راهنمایی و بدون گذشت خطا.
+// فقط فاصله‌های اضافی ابتدا/انتها و تکرار فاصله پاک می‌شود و ی/ک عربی با فارسی یکدست می‌شود
+// (چون همان حرف با کد یونیکد متفاوت است). نیم‌فاصله، اعراب و حتی یک حرف اشتباه = حدس اشتباه.
+function exactNorm(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\u064A/g, '\u06CC') // ي → ی (همان حرف، انکدینگ متفاوت)
+    .replace(/\u0643/g, '\u06A9') // ك → ک (همان حرف، انکدینگ متفاوت)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function err(code, msg) {
   const e = new Error(msg || code);
   e.code = code;
@@ -61,4 +73,4 @@ function err(code, msg) {
   return e;
 }
 
-module.exports = { rid, pid, pick, shuffle, now, cleanText, normalizeFa, err };
+module.exports = { rid, pid, pick, shuffle, now, cleanText, normalizeFa, exactNorm, err };

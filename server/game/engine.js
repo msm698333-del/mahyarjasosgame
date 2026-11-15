@@ -54,6 +54,7 @@ module.exports = function createEngine(ctx) {
       if (g.sub === 'challenge') return { key: 'challenge', at: g.deadlines.challenge };
     }
     if (g.phase === 'vote') return { key: 'vote', at: g.deadlines.vote };
+    if (g.phase === 'shot') return { key: 'shot', at: g.deadlines.shot };
     if (g.phase === 'night') return { key: 'night', at: g.deadlines.night };
     if (g.phase === 'guess') return { key: 'guess', at: g.deadlines.guess };
     return null;
@@ -67,6 +68,7 @@ module.exports = function createEngine(ctx) {
     room.status = 'playing';
     g.phase = 'deal';
     g.dayNo = 1;
+    g.startCount = n; // سناریو مسابقه — مبنای قانون شات (۶ نفره یا بالاتر)
     g.termsTotal = n + cfg.TERMS_EXTRA;
     g.termsUsed = 0;
     const { word, category } = ctx.words.pickWord();
@@ -88,6 +90,7 @@ module.exports = function createEngine(ctx) {
     g.revote = false;
     g.nightPicks = {};
     g.guess = null;
+    g.shot = null;
     g.stickers = {};
     g.log = [];
     g.eliminated = [];
@@ -135,6 +138,7 @@ module.exports = function createEngine(ctx) {
       return dayStart(room);
     }
     if (g.phase === 'vote') return schedule(room, 'vote', rem('vote'), () => resolveVote(room));
+    if (g.phase === 'shot') return schedule(room, 'shot', rem('shot'), () => shotTimeout(room));
     if (g.phase === 'night') return schedule(room, 'night', rem('night'), () => resolveNight(room));
     if (g.phase === 'guess') return schedule(room, 'guess', rem('guess'), () => guessTimeout(room));
   }
@@ -380,13 +384,91 @@ module.exports = function createEngine(ctx) {
     emit.toRoom(room, 'game:eliminated', () => ({ player: pubFull(elim), role: elim.role, by, sfx: 'eliminate' }));
     emit.presence(room);
     ctx.persistRoom(room);
+    // قانون شات: اگر جاسوس با رأی بازیکن‌ها حذف شده و سناریو ۶ نفره یا بالاتر بوده،
+    // او فرصت دارد یک بازیکن دیگر را هم با خودش شات کند (اختیاری). بعد از آن فرصت حدس کلمه دارد.
+    if (by === 'vote' && elim.role === 'spy') {
+      if (g.startCount >= cfg.SHOT_MIN_PLAYERS && g.players.some((p) => p.alive)) return startShot(room, elim);
+      return startGuess(room, elim);
+    }
+    return afterElimination(room, by);
+  }
+
+  // شرط‌های پایان پس از هر حذف (غیر از مسیر شات/حدس جاسوسِ حذف‌شده)
+  function afterElimination(room, by) {
+    const g = room.game;
     const spiesAlive = g.players.filter((p) => p.alive && p.role === 'spy').length;
     const citizensAlive = g.players.filter((p) => p.alive && p.role !== 'spy').length;
     if (spiesAlive === 0) return gameOver(room, 'citizens', 'all_spies_caught');
     if (spiesAlive >= citizensAlive) return gameOver(room, 'spies', 'parity');
-    if (by === 'vote' && elim.role === 'spy') return startGuess(room, elim);
-    if (by === 'vote') return startNight(room);
-    return newDay(room); // حذف شبانه
+    if (by === 'night') return newDay(room); // حذف شبانه
+    return startNight(room);
+  }
+
+  // شرط‌های پایان پس از فرصت حدس جاسوسِ حذف‌شده (با رأی)
+  function afterCaught(room) {
+    const g = room.game;
+    const spiesAlive = g.players.filter((p) => p.alive && p.role === 'spy').length;
+    const citizensAlive = g.players.filter((p) => p.alive && p.role !== 'spy').length;
+    if (spiesAlive === 0) return gameOver(room, 'citizens', 'all_spies_caught');
+    if (spiesAlive >= citizensAlive) return gameOver(room, 'spies', 'parity');
+    return startNight(room);
+  }
+
+  // ── فرصت شات جاسوس (فقط سناریو ۶ نفره یا بالاتر، بعد از رأی‌گیری) ──
+  function startShot(room, spy) {
+    const g = room.game;
+    g.phase = 'shot';
+    g.sub = null;
+    g.shot = { spyId: spy.id, targetId: null, done: false };
+    schedule(room, 'shot', cfg.SHOT_MS, () => shotTimeout(room));
+    emit.toRoom(room, 'game:shotStart', (me) => ({
+      spy: pubFull(spy),
+      deadline: g.deadlines.shot,
+      seconds: Math.round(cfg.SHOT_MS / 1000),
+      mine: me.id === spy.id,
+    }));
+  }
+
+  function shotPick(room, player, data) {
+    const g = room.game;
+    if (!g || g.phase !== 'shot' || !g.shot || g.shot.done) throw util.err('phase', 'الان مرحله شات نیست.');
+    if (g.shot.spyId !== player.id) throw util.err('not_spy', 'شات فقط با جاسوسِ حذف‌شده است.');
+    const t = gPlayer(g, data && data.targetId);
+    if (!t || !t.alive) throw util.err('bad_target', 'این بازیکن در دسترس نیست.');
+    g.shot.done = true;
+    g.shot.targetId = t.id;
+    clearTimer(room, 'shot');
+    t.alive = false;
+    g.eliminated.push({ id: t.id, name: t.name, avatar: t.avatar, role: t.role, by: 'shot', day: g.dayNo });
+    g.log.push({ t: 'e', text: `${t.name} با شات جاسوس حذف شد`, who: t.number, by: 'shot', day: g.dayNo });
+    emit.toRoom(room, 'game:shotResult', () => ({
+      spy: pubFull(gPlayer(g, g.shot.spyId)),
+      target: pubFull(t),
+      role: t.role,
+      sfx: 'eliminate',
+    }));
+    emit.toRoom(room, 'game:eliminated', () => ({ player: pubFull(t), role: t.role, by: 'shot', sfx: 'eliminate' }));
+    emit.presence(room);
+    ctx.persistRoom(room);
+    startGuess(room, gPlayer(g, g.shot.spyId));
+  }
+
+  function shotSkip(room, player) {
+    const g = room.game;
+    if (!g || g.phase !== 'shot' || !g.shot || g.shot.done) throw util.err('phase', 'الان مرحله شات نیست.');
+    if (g.shot.spyId !== player.id) throw util.err('not_spy', 'شات فقط با جاسوسِ حذف‌شده است.');
+    g.shot.done = true;
+    clearTimer(room, 'shot');
+    emit.toRoom(room, 'game:note', () => ({ text: 'جاسوس از حق شات استفاده نکرد.' }));
+    startGuess(room, gPlayer(g, g.shot.spyId));
+  }
+
+  function shotTimeout(room) {
+    const g = room.game;
+    if (!g || g.phase !== 'shot' || !g.shot || g.shot.done) return;
+    g.shot.done = true;
+    emit.toRoom(room, 'game:note', () => ({ text: 'فرصت شات تمام شد؛ شات استفاده نشد.' }));
+    startGuess(room, gPlayer(g, g.shot.spyId));
   }
 
   // ── حدس کلمه توسط جاسوس حذف‌شده ──
@@ -410,17 +492,18 @@ module.exports = function createEngine(ctx) {
     const g = room.game;
     if (!g || g.phase !== 'guess' || !g.guess || g.guess.done) throw util.err('phase', 'الان مرحله حدس نیست.');
     if (g.guess.spyId !== player.id) throw util.err('not_spy', 'حدس کلمه فقط با جاسوس حذف‌شده است.');
-    const guess = util.normalizeFa(util.cleanText(data && data.word, 60));
+    const guess = util.exactNorm(util.cleanText(data && data.word, 60));
     if (!guess) throw util.err('bad_text', 'حدس خالی است.');
     g.guess.done = true;
     clearTimer(room, 'guess');
-    if (guess === util.normalizeFa(g.word)) {
+    // مقایسهٔ کاملاً دقیق — بدون هیچ راهنمایی؛ حتی یک حرف اشتباه یعنی حدس اشتباه
+    if (guess === util.exactNorm(g.word)) {
       g.guess.correct = true;
       emit.toRoom(room, 'game:guessResult', () => ({ correct: true, spyId: player.id, sfx: 'eliminate' }));
       return gameOver(room, 'spies', 'word_guessed');
     }
     emit.toRoom(room, 'game:guessResult', () => ({ correct: false, spyId: player.id }));
-    startNight(room);
+    return afterCaught(room);
   }
 
   function guessTimeout(room) {
@@ -428,7 +511,29 @@ module.exports = function createEngine(ctx) {
     if (!g || !g.guess || g.guess.done) return;
     g.guess.done = true;
     emit.toRoom(room, 'game:guessResult', () => ({ correct: false, spyId: g.guess.spyId, timeout: true }));
-    startNight(room);
+    return afterCaught(room);
+  }
+
+  // ── اعلام پایان بازی توسط جاسوس زنده (در ترم/روز خودش): حدس دقیق کلمه ──
+  // اگر درست بگوید جاسوس‌ها برنده‌اند؛ اگر حتی یک حرف اشتباه بنویسد فوراً حذف می‌شود.
+  function spyDeclare(room, player, data) {
+    const g = room.game;
+    if (!g || (g.phase !== 'day' && g.phase !== 'vote'))
+      throw util.err('phase', 'اعلام پایان بازی فقط در روز یا رأی‌گیری ممکن است.');
+    const me = gPlayer(g, player.id);
+    if (!me || !me.alive) throw util.err('eliminated', 'بازیکن حذف‌شده نمی‌تواند اعلام کند.');
+    if (me.role !== 'spy') throw util.err('not_spy', 'این امکان فقط برای جاسوس است.');
+    const guess = util.exactNorm(util.cleanText(data && data.word, 60));
+    if (!guess) throw util.err('bad_text', 'کلمه را دقیق بنویس.');
+    emit.toRoom(room, 'game:note', () => ({ text: `${me.name} اعلام پایان بازی کرد: «کلمه را می‌دانم!»` }));
+    if (guess === util.exactNorm(g.word)) {
+      g.log.push({ t: 's', text: `${me.name} کلمه را دقیق حدس زد`, day: g.dayNo });
+      emit.toRoom(room, 'game:declareResult', () => ({ correct: true, spyId: me.id }));
+      return gameOver(room, 'spies', 'word_guessed');
+    }
+    g.log.push({ t: 's', text: `${me.name} اعلام کرد اما کلمه اشتباه بود`, day: g.dayNo });
+    emit.toRoom(room, 'game:declareResult', () => ({ correct: false, spyId: me.id }));
+    return applyElimination(room, me, 'declare');
   }
 
   // ── شب جاسوس ──
@@ -504,14 +609,19 @@ module.exports = function createEngine(ctx) {
     g.winner = winner;
     g.reason = reason;
     clearAllTimers(room);
+    const isTest = !!room.test; // اتاق آزمایشی: بدون سکه، بدون آمار، بدون تاریخچه
     const rewards = [];
     for (const p of g.players) {
       const won = p.role === 'spy' ? winner === 'spies' : winner === 'citizens';
-      const delta = won ? cfg.MATCH_WIN_REWARD : cfg.MATCH_LOSE_REWARD;
-      const balance = db.addCoins(p.id, delta, 'match', { room: room.code, result: won ? 'win' : 'loss' });
-      db.bumpStats(p.id, won ? 'win' : 'loss');
-      db.recordMatch(p.id, room.code, g.players.length, p.role, won ? 'win' : 'loss', g.word, delta);
-      rewards.push({ id: p.id, delta, balance: balance == null ? null : balance });
+      if (isTest) {
+        rewards.push({ id: p.id, delta: 0, balance: null });
+      } else {
+        const delta = won ? cfg.MATCH_WIN_REWARD : cfg.MATCH_LOSE_REWARD;
+        const balance = db.addCoins(p.id, delta, 'match', { room: room.code, result: won ? 'win' : 'loss' });
+        db.bumpStats(p.id, won ? 'win' : 'loss');
+        db.recordMatch(p.id, room.code, g.players.length, p.role, won ? 'win' : 'loss', g.word, delta);
+        rewards.push({ id: p.id, delta, balance: balance == null ? null : balance });
+      }
       emit.meUpdate(p.id);
     }
     room.status = 'over';
@@ -525,6 +635,7 @@ module.exports = function createEngine(ctx) {
       roles: g.players.map((p) => pubFull(p)),
       order: g.eliminated,
       rewards,
+      test: isTest,
       me: rewards.find((r) => r.id === me.id) || null,
       music: 'end',
       sfx: 'end',
@@ -542,6 +653,7 @@ module.exports = function createEngine(ctx) {
       phase: g.phase,
       sub: g.sub,
       dayNo: g.dayNo,
+      startCount: g.startCount || null,
       termsTotal: g.termsTotal,
       termsUsed: g.termsUsed,
       players: publicPlayers(g),
@@ -566,6 +678,9 @@ module.exports = function createEngine(ctx) {
       nightIsSpy: g.phase === 'night' && me && me.alive && isSpy,
       nightPicksMine: g.nightPicks[playerId] || null,
       guessMine: g.phase === 'guess' && g.guess && g.guess.spyId === playerId && !g.guess.done,
+      shotMine: g.phase === 'shot' && g.shot && g.shot.spyId === playerId && !g.shot.done,
+      shotSpy: g.phase === 'shot' && g.shot ? pubFull(gPlayer(g, g.shot.spyId) || {}) : null,
+      shotDone: g.phase === 'shot' && g.shot ? !!g.shot.done : undefined,
       stickerUsed: !!g.stickers[playerId],
       log: g.log.slice(-40),
       eliminated: g.eliminated,
@@ -606,6 +721,9 @@ module.exports = function createEngine(ctx) {
     voteCast,
     nightPick,
     guessWord,
+    spyDeclare,
+    shotPick,
+    shotSkip,
     snapshot,
     setConnected,
     publicPlayers,

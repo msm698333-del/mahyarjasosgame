@@ -17,7 +17,7 @@ module.exports = function createLobby(ctx) {
       })),
       game: g,
     };
-    ctx.db.saveRoom(room.code, room.status, room.hostId, { slots: room.slots, fee: room.fee }, payload);
+    ctx.db.saveRoom(room.code, room.status, room.hostId, { slots: room.slots, fee: room.fee, test: !!room.test }, payload);
   }
   ctx.persistRoom = persist;
 
@@ -36,6 +36,7 @@ module.exports = function createLobby(ctx) {
       hostId: room.hostId,
       slots: room.slots,
       fee: room.fee,
+      test: !!room.test,
       players: room.players.map((p) => ({
         id: p.id,
         name: p.name,
@@ -47,6 +48,10 @@ module.exports = function createLobby(ctx) {
     };
   }
 
+  function minPlayersOf(room) {
+    return room.test ? cfg.TEST_MIN_PLAYERS : cfg.MIN_PLAYERS;
+  }
+
   function broadcastState(room) {
     persist(room);
     emit.toRoom(room, 'room:state', (me) => {
@@ -54,7 +59,8 @@ module.exports = function createLobby(ctx) {
       const mine = room.players.find((p) => p.id === me.id);
       return {
         ...rosterPayload(room),
-        canStart: room.players.length >= cfg.MIN_PLAYERS,
+        canStart: room.players.length >= minPlayersOf(room),
+        minPlayers: minPlayersOf(room),
         me: dbp
           ? {
               coins: dbp.coins,
@@ -114,18 +120,20 @@ module.exports = function createLobby(ctx) {
     const player = db.getPlayer(playerId);
     if (!player) throw util.err('no_player', 'هویت پیدا نشد؛ دوباره وارد شو.');
     autoLeave(playerId);
+    const isTest = !!(data && data.test); // اتاق آزمایشی: ۲ نفره، رایگان، بدون اثر روی سکه/آمار
     let slots = Math.floor(Number(data && data.slots));
-    if (!Number.isFinite(slots)) slots = 8;
-    slots = Math.max(cfg.MIN_PLAYERS, Math.min(cfg.MAX_PLAYERS, slots));
+    if (!Number.isFinite(slots)) slots = isTest ? 2 : 8;
+    slots = Math.max(isTest ? cfg.TEST_MIN_PLAYERS : cfg.MIN_PLAYERS, Math.min(cfg.MAX_PLAYERS, slots));
     let fee = Math.floor(Number(data && data.fee));
     if (!Number.isFinite(fee)) fee = cfg.ENTRY_FEE_DEFAULT;
-    fee = Math.max(cfg.ENTRY_FEE_MIN, Math.min(cfg.ENTRY_FEE_MAX, fee));
-    const paid = db.consumeEntry(playerId, fee); // سازنده هم مثل بقیه ورود می‌پردازد
+    fee = isTest ? 0 : Math.max(cfg.ENTRY_FEE_MIN, Math.min(cfg.ENTRY_FEE_MAX, fee));
+    const paid = isTest ? null : db.consumeEntry(playerId, fee); // اتاق آزمایشی ورود نمی‌گیرد
     const room = {
       code: codeUnique(),
       hostId: playerId,
       slots,
       fee,
+      test: isTest,
       status: 'lobby',
       players: [
         {
@@ -188,7 +196,7 @@ module.exports = function createLobby(ctx) {
     }
     autoLeave(playerId);
     if (room.players.length >= room.slots) throw util.err('full', 'ظرفیت لابی پر است.');
-    const paid = db.consumeEntry(playerId, room.fee);
+    const paid = room.test ? null : db.consumeEntry(playerId, room.fee); // اتاق آزمایشی ورود نمی‌گیرد
     const member = {
       id: playerId,
       name: player.name,
@@ -270,7 +278,7 @@ module.exports = function createLobby(ctx) {
     if (room.hostId !== playerId) throw util.err('not_host', 'فقط سازنده لابی می‌تواند تنظیم کند.');
     let slots = Math.floor(Number(data && data.slots));
     if (!Number.isFinite(slots)) throw util.err('bad_input');
-    slots = Math.max(Math.max(cfg.MIN_PLAYERS, room.players.length), Math.min(cfg.MAX_PLAYERS, slots));
+    slots = Math.max(Math.max(minPlayersOf(room), room.players.length), Math.min(cfg.MAX_PLAYERS, slots));
     room.slots = slots;
     broadcastState(room);
     return { ok: true, slots };
@@ -281,6 +289,7 @@ module.exports = function createLobby(ctx) {
     const room = roomOf(playerId);
     if (!room || room.status !== 'lobby') throw util.err('phase');
     if (room.hostId !== playerId) throw util.err('not_host', 'فقط سازنده لابی می‌تواند تنظیم کند.');
+    if (room.test) return { ok: true, fee: room.fee }; // اتاق آزمایشی همیشه رایگان است
     let fee = Math.floor(Number(data && data.fee));
     if (!Number.isFinite(fee)) throw util.err('bad_input');
     fee = Math.max(cfg.ENTRY_FEE_MIN, Math.min(cfg.ENTRY_FEE_MAX, fee));
@@ -296,8 +305,8 @@ module.exports = function createLobby(ctx) {
     if (!room) throw util.err('no_room');
     if (room.hostId !== playerId) throw util.err('not_host', 'شروع بازی فقط با سازنده لابی است.');
     if (room.status !== 'lobby') throw util.err('phase', 'بازی قبلاً شروع شده است.');
-    if (room.players.length < cfg.MIN_PLAYERS)
-      throw util.err('min_players', `حداقل ${cfg.MIN_PLAYERS} بازیکن لازم است.`);
+    if (room.players.length < minPlayersOf(room))
+      throw util.err('min_players', room.test ? 'حداقل ۲ بازیکن لازم است.' : `حداقل ${cfg.MIN_PLAYERS} بازیکن لازم است.`);
     ctx.engine.startMatch(room);
     persist(room);
     return { ok: true };
@@ -312,6 +321,19 @@ module.exports = function createLobby(ctx) {
     if (room.status !== 'over') throw util.err('phase', 'بازی هنوز تمام نشده است.');
     const keep = [];
     for (const p of room.players) {
+      if (room.test) {
+        // اتاق آزمایشی: بدون پرداخت ورود
+        keep.push({
+          id: p.id,
+          name: p.name,
+          avatar: p.avatar,
+          ready: false,
+          connected: !!p.connected,
+          paid: null,
+          graceTimer: null,
+        });
+        continue;
+      }
       try {
         const paid = db.consumeEntry(p.id, room.fee);
         keep.push({
@@ -443,6 +465,7 @@ module.exports = function createLobby(ctx) {
         hostId: r.hostId,
         slots: r.config.slots || 8,
         fee: r.config.fee != null ? r.config.fee : cfg.ENTRY_FEE_DEFAULT,
+        test: !!(r.config && r.config.test),
         status: r.status,
         players: (r.state.roster || []).map((p) => ({
           id: p.id,

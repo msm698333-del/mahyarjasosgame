@@ -4,6 +4,7 @@ module.exports = function attach(io, ctx) {
   const globalLimiter = ctx.makeLimiter();
   const textLimiter = ctx.makeLimiter();
   const heavyLimiter = ctx.makeLimiter();
+  const voiceLimiter = ctx.makeLimiter();
 
   // احراز هویت هندشیک: توکن از auth یا کوکی
   io.use((socket, next) => {
@@ -133,6 +134,44 @@ module.exports = function attach(io, ctx) {
       },
       { text: true }
     );
+    on(
+      'game:declare',
+      (data) => {
+        const room = roomOf();
+        if (!room || !memberOf(room)) throw util.err('no_room');
+        engine.spyDeclare(room, player(), data);
+      },
+      { text: true }
+    );
+    on('game:shot', (data) => {
+      const room = roomOf();
+      if (!room || !memberOf(room)) throw util.err('no_room');
+      engine.shotPick(room, player(), data);
+    });
+    on('game:shotSkip', () => {
+      const room = roomOf();
+      if (!room || !memberOf(room)) throw util.err('no_room');
+      engine.shotSkip(room, player());
+    });
+
+    // ─── ویس زنده (سیگنالینگ WebRTC) ───
+    on('voice:join', () => ctx.voice.join(playerId));
+    on('voice:leave', () => ctx.voice.leave(playerId));
+    // پیام‌های ICE پرتعدادند — محدودکنندهٔ اختصاصی سبک، مستقل از سقف عمومی
+    socket.on('voice:signal', (data, ackArg) => {
+      const done = (payload) => {
+        if (typeof ackArg === 'function') ackArg(payload);
+      };
+      if (!voiceLimiter('v:' + playerId, 150, 10000)) {
+        return done({ ok: false, code: 'rate', msg: 'کمی صبر کن…' });
+      }
+      try {
+        ctx.voice.signal(playerId, data);
+        done({ ok: true });
+      } catch (e) {
+        done({ ok: false, code: e.code || 'server', msg: e.msg || 'خطای سرور' });
+      }
+    });
 
     // ─── دوز ───
     on('ttt:ai', (data) => ttt.aiStart(socket, data), { heavy: true });
@@ -145,6 +184,8 @@ module.exports = function attach(io, ctx) {
 
     socket.on('disconnect', () => {
       ctx.removeSocket(playerId, socket);
+      // ویس فقط وقتی قطع می‌شود که هیچ سوکت دیگری از این بازیکن باقی نمانده باشد
+      if (ctx.socketsFor(playerId).length === 0) ctx.voice.onDisconnect(playerId);
       lobby.onDisconnect(playerId);
       ttt.onDisconnect(socket);
     });
