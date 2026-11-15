@@ -22,14 +22,28 @@
       <div>
         <div class="muted small">کد لابی — به دوستانت بده</div>
         <div style="font-size:30px;font-weight:900;letter-spacing:7px;direction:ltr;text-align:right" id="lobby-code">------</div>
+        <span class="chip active" id="test-badge" style="display:none;margin-top:6px">اتاق آزمایشی — رایگان و بدون اثر روی سکه‌ها</span>
       </div>
-      <button class="btn btn-sm" id="copy-btn">کپی کد</button>
+      <div class="stack" style="gap:8px">
+        <button class="btn btn-sm" id="copy-btn">کپی کد</button>
+        <button class="btn btn-sm btn-ghost" id="invite-btn">کپی لینک دعوت</button>
+      </div>
     </div>
     <div class="divider"></div>
     <div class="row-between">
       <span class="muted small" id="count-info">—</span>
       <span class="muted small" id="fee-info">—</span>
     </div>
+  </div>
+
+  <div class="card voice-card" id="voice-card">
+    <div class="voice-row">
+      <button class="btn btn-sm" id="voice-join">ورود به گفتگوی صوتی</button>
+      <button class="btn btn-sm btn-ghost" id="voice-mic" style="display:none">قطع میکروفون</button>
+      <span class="vs-dot" id="voice-me" title="صدای من"></span>
+      <span class="muted small" id="voice-count"></span>
+    </div>
+    <div class="muted small" id="voice-hint" style="display:none;margin-top:6px">صدا مستقیم بین بازیکنان رد و بدل می‌شود. هر وقت خواستی میکروفون را قطع کن.</div>
   </div>
 
   <div class="card">
@@ -41,7 +55,7 @@
         <label>ظرفیت لابی</label>
         <div class="chips" id="slots-chips"></div>
       </div>
-      <div class="field">
+      <div class="field" id="fee-field">
         <label>هزینه ورود (سکه)</label>
         <div class="chips" id="fee-chips"></div>
       </div>
@@ -61,6 +75,7 @@
 <script src="vendor/socket.io.min.js"></script>
 <script src="js/core.js"></script>
 <script src="js/audio.js"></script>
+<script src="js/voice.js"></script>
 <script src="js/lobby.js"></script>
 </body>
 </html>

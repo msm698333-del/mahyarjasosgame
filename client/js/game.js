@@ -21,6 +21,7 @@
     candidates: [], revote: false, myVote: null, voteCount: 0, voteTotal: 0,
     nightIsSpy: false, nightPicksMine: null, nightProgress: { picked: 0, needed: 1 },
     guessMine: false, guessSpy: null,
+    shotMine: false, shotSpy: null, shotDone: false, startCount: 0,
     stickerUsed: false, log: [], eliminated: [],
     selected: null, actionBusy: false,
   };
@@ -54,6 +55,7 @@
     if (G.phase === 'day' && G.sub === 'floor' && G.askerId === p.id && !G.question) return true;
     if (G.phase === 'day' && G.sub === 'challenge' && G.targetId === p.id && G.answer) return true;
     if (G.phase === 'vote' && meAlive()) return true;
+    if (G.phase === 'shot' && G.shotMine && !G.shotDone) return true;
     if (G.phase === 'night' && G.nightIsSpy && meAlive()) return true;
     return false;
   }
@@ -74,6 +76,7 @@
     G.players.forEach((pl) => {
       const isMe = pl.id === p.id;
       const card = SPY.el('div', 'player-card' + (pl.alive ? '' : ' dead') + (allowed.has(pl.id) ? ' selectable' : '') + (G.selected === pl.id ? ' selected' : ''));
+      card.dataset.pid = pl.id; // برای نشانگر «در حال صحبت» ویس
       const frame = SPY.avatar(pl.avatar, 50, { num: pl.number, status: pl.connected, dead: !pl.alive, off: !pl.connected, selected: G.selected === pl.id });
       card.appendChild(frame);
       const nm = SPY.el('div', 'pc-name');
@@ -148,6 +151,55 @@
     box.scrollTop = box.scrollHeight;
   }
 
+  // ── اعلام پایان بازی جاسوس زنده (حدس دقیق کلمه) ──
+  function myTermActive() {
+    return G.phase === 'day' && meAlive() && isSpy() && (G.askerId === p.id || G.targetId === p.id);
+  }
+  function declareBtn() {
+    if (!myTermActive()) return null;
+    const b = SPY.el('button', 'btn btn-danger btn-block declare-btn', 'پایان بازی: کلمه را می‌دانم!');
+    b.onclick = openDeclareModal;
+    return b;
+  }
+  function openDeclareModal() {
+    SPY.confirmBox(
+      'اعلام پایان بازی: کلمه مخفی را باید دقیق و کامل بنویسی. اگر حتی یک حرف اشتباه باشد، فوراً حذف می‌شوی و می‌بازی. ادامه می‌دهی؟',
+      'بله، مطمئنم',
+      true
+    ).then((ok) => {
+      if (!ok) return;
+      const m = SPY.modal(
+        `<h3>حدس کلمه مخفی</h3>
+         <p class="muted small">کلمه را دقیق و کامل بنویس — بازی هیچ راهنمایی نمی‌دهد و حتی یک حرف اشتباه یعنی باخت فوری.</p>
+         <input class="input declare-input" id="declare-input" maxlength="60" dir="auto" placeholder="کلمه را دقیق بنویس…"
+                autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"/>
+         <button class="btn btn-gold btn-block" id="declare-send" style="margin-top:10px">اعلام و پایان بازی</button>`,
+        { lock: true }
+      );
+      const inp = m.el.querySelector('#declare-input');
+      const send = async () => {
+        const word = inp.value.trim();
+        if (!word) {
+          SPY.toast('کلمه را بنویس.', 'err');
+          return;
+        }
+        m.el.querySelector('#declare-send').disabled = true;
+        const res = await SPY.emit('game:declare', { word });
+        if (!res.ok) {
+          SPY.toast(res.msg || 'خطا', 'err');
+          m.el.querySelector('#declare-send').disabled = false;
+          return;
+        }
+        m.close();
+      };
+      m.el.querySelector('#declare-send').onclick = send;
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') send();
+      });
+      inp.focus();
+    });
+  }
+
   // ── پنل عملیات ──
   function renderAction() {
     const ap = document.getElementById('action-panel');
@@ -156,6 +208,7 @@
     if (G.phase === 'deal') return;
     if (G.phase === 'vote') return renderVotePanel(ap);
     if (G.phase === 'night') return renderNightPanel(ap);
+    if (G.phase === 'shot') return renderShotPanel(ap);
     if (G.phase === 'guess') {
       ap.appendChild(SPY.el('div', 'panel-hint', 'جاسوس حذف‌شده فرصت دارد کلمه مخفی را حدس بزند…'));
       return;
@@ -189,10 +242,11 @@
         if (!res.ok) SPY.toast(res.msg || 'خطا', 'err');
       };
       ap.appendChild(btn);
+      ap.appendChild(declareBtn());
       return;
     }
 
-    if (G.sub === 'answer' && G.targetId === p.id && !G.answer && G.question) {
+  if (G.sub === 'answer' && G.targetId === p.id && !G.answer && G.question) {
       const hint = SPY.el('div', 'panel-hint', 'سؤال برای توست — پاسخ بده. صادقانه ولی نه‌چنان که کلمه لو برود!');
       ap.appendChild(hint);
       const ta = document.createElement('textarea');
@@ -214,6 +268,8 @@
         if (!res.ok) SPY.toast(res.msg || 'خطا', 'err');
       };
       ap.appendChild(btn);
+      const db2 = declareBtn();
+      if (db2) ap.appendChild(db2);
       return;
     }
 
@@ -237,6 +293,8 @@
         }
       };
       ap.appendChild(btn);
+      const db3 = declareBtn();
+      if (db3) ap.appendChild(db3);
       return;
     }
 
@@ -275,6 +333,44 @@
     };
     ap.appendChild(btn);
     if (G.myVote) ap.appendChild(SPY.el('div', 'hint', 'رأی فعلی تو ثبت شده؛ با انتخاب بازیکن دیگر می‌توانی عوضش کنی.'));
+    if (isSpy()) {
+      const dv = SPY.el('button', 'btn btn-danger btn-block declare-btn', 'پایان بازی: کلمه را می‌دانم!');
+      dv.onclick = openDeclareModal;
+      ap.appendChild(dv);
+      ap.appendChild(SPY.el('div', 'hint', 'اعلام پایان بازی: کلمه را باید دقیق بنویسی — اشتباه یعنی حذف فوری تو.'));
+    }
+  }
+
+  // ── فرصت شات جاسوس (فقط سناریو ۶ نفره یا بالاتر) ──
+  function renderShotPanel(ap) {
+    if (G.shotMine && !G.shotDone) {
+      ap.appendChild(SPY.el('div', 'panel-hint', `فرصت شات! سناریو ${SPY.fa(G.startCount || 0)} نفره بود، پس می‌توانی یک بازیکن زنده را با خودت حذف کنی (اختیاری). ${G.selected ? `شماره ${SPY.fa((byId(G.selected) || {}).number)} را انتخاب کردی.` : 'از روی کارت‌ها یکی را انتخاب کن یا شات نزن.'}`));
+      const btn = SPY.el('button', 'btn btn-danger btn-block', G.selected ? `شات به شماره ${SPY.fa((byId(G.selected) || {}).number)}` : 'اول یک بازیکن انتخاب کن');
+      btn.disabled = !G.selected;
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const res = await SPY.emit('game:shot', { targetId: G.selected });
+        if (!res.ok) {
+          btn.disabled = false;
+          SPY.toast(res.msg || 'خطا', 'err');
+        }
+      };
+      ap.appendChild(btn);
+      const skip = SPY.el('button', 'btn btn-ghost btn-block', 'شات نمی‌زنم');
+      skip.onclick = async () => {
+        skip.disabled = true;
+        const res = await SPY.emit('game:shotSkip', {});
+        if (!res.ok) {
+          skip.disabled = false;
+          SPY.toast(res.msg || 'خطا', 'err');
+        }
+      };
+      ap.appendChild(skip);
+    } else if (G.shotDone) {
+      ap.appendChild(SPY.el('div', 'panel-hint', 'شات انجام شد…'));
+    } else {
+      ap.appendChild(SPY.el('div', 'panel-hint', `${(G.shotSpy || {}).name || 'جاسوس'} حذف شد و در سناریو ۶ نفره فرصت شات دارد…`));
+    }
   }
 
   function renderVoteProgress() {
@@ -354,6 +450,12 @@
       banner.classList.add('vote');
       t.textContent = 'حدس کلمه مخفی!';
       s.textContent = G.guessMine ? 'فرصت داری کلمه را حدس بزنی' : `${(G.guessSpy || {}).name || 'جاسوس'} دارد حدس می‌زند…`;
+    } else if (G.phase === 'shot') {
+      banner.classList.add('vote');
+      t.textContent = 'فرصت شات جاسوس!';
+      s.textContent = G.shotMine && !G.shotDone
+        ? 'می‌توانی یک بازیکن زنده را با خودت حذف کنی (اختیاری)'
+        : 'جاسوس حذف‌شده می‌تواند یک نفر را شات کند…';
     } else if (G.phase === 'over') {
       t.textContent = 'پایان مسابقه';
       s.textContent = 'در حال انتقال به صفحه نتیجه…';
@@ -453,8 +555,9 @@
   function guessModal(deadline) {
     const m = SPY.modal(
       `<h3>حدس کلمه مخفی</h3>
-       <p class="muted small">اگر کلمه را درست حدس بزنی، جاسوس‌ها می‌برند! (${Math.round((deadline - Date.now()) / 1000)} ثانیه)</p>
-       <input class="input" id="guess-input" maxlength="60" placeholder="کلمه را بنویس…"/>
+       <p class="muted small">کلمه را دقیق و کامل بنویس — بازی هیچ راهنمایی نمی‌دهد و حتی یک حرف اشتباه یعنی حدس اشتباه. (${Math.round((deadline - Date.now()) / 1000)} ثانیه)</p>
+       <input class="input guess-input" id="guess-input" maxlength="60" dir="auto" placeholder="کلمه را دقیق بنویس…"
+              autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"/>
        <button class="btn btn-gold btn-block" id="guess-send" style="margin-top:10px">ثبت حدس</button>`,
       { lock: true }
     );
@@ -491,6 +594,10 @@
     G.deadline = s.deadline;
     G.deadlineKey = s.deadlineKey;
     G.stickerUsed = !!s.stickerUsed;
+    G.shotMine = !!s.shotMine;
+    G.shotSpy = s.shotSpy || null;
+    G.shotDone = !!s.shotDone;
+    if (s.startCount) G.startCount = s.startCount;
     G.eliminated = s.eliminated || [];
     G.selected = null;
     if (s.log) G.log = s.log.map((l) => ({ kind: l.t === 'q' ? 'q' : l.t === 'a' ? 'a' : 'note', text: l.text, fromNum: l.from, toNum: l.to, term: l.term, mine: false, timeout: l.text === '(بدون پاسخ)' }));
@@ -556,6 +663,7 @@
     G.category = d.me.category;
     G.phase = 'deal';
     G.dayNo = 1;
+    G.startCount = d.players.length;
     G.termsTotal = d.termsTotal;
     G.termsUsed = 0;
     G.log = [];
@@ -695,6 +803,45 @@
   SPY.on('game:guessResult', (d) => {
     if (d.correct) SPY.toast('حدس جاسوس درست بود!', 'err');
     else SPY.toast(d.timeout ? 'جاسوس فرصت حدس را از دست داد.' : 'حدس جاسوس اشتباه بود.', 'ok');
+  });
+  SPY.on('game:shotStart', (d) => {
+    G.phase = 'shot';
+    G.sub = null;
+    G.shotSpy = d.spy || null;
+    G.shotMine = !!d.mine;
+    G.shotDone = false;
+    G.deadline = d.deadline;
+    G.deadlineTotal = d.seconds || 12;
+    G.selected = null;
+    SPY_AUDIO.playSfx('eliminate');
+    renderBanner();
+    renderPlayers();
+    renderAction();
+    renderStickers();
+  });
+  SPY.on('game:shotResult', (d) => {
+    G.shotDone = true;
+    const tgt = d.target || {};
+    SPY.modal(
+      `<h3>شات جاسوس!</h3>
+       <div class="center" style="padding:8px 0">
+         <div id="sh-ava" style="display:flex;justify-content:center"></div>
+         <div style="font-weight:900;font-size:16px;margin-top:8px">${SPY.esc(tgt.name || '?')} با شات جاسوس حذف شد</div>
+         <div style="margin-top:6px"><span class="role-pill ${d.role === 'spy' ? 'spy' : 'citizen'}">${d.role === 'spy' ? 'جاسوس بود' : 'شهروند بود'}</span></div>
+       </div>
+       <button class="btn btn-block" id="sh-ok">ادامه</button>`,
+      { lock: true }
+    ).el.querySelector('#sh-ok').onclick = function () { this.closest('.overlay').remove(); };
+    const shAva = document.getElementById('sh-ava');
+    if (shAva && tgt.avatar) shAva.appendChild(SPY.avatar(tgt.avatar, 60, { dead: true }));
+    renderPlayers();
+    renderAction();
+  });
+  SPY.on('game:declareResult', (d) => {
+    const who = (byId(d.spyId) || {}).name || 'جاسوس';
+    if (d.correct) SPY.toast(`${who} کلمه را دقیق حدس زد — جاسوس‌ها بردند!`, 'err');
+    else SPY.toast(`اعلام ${who} اشتباه بود — حذف شد!`, 'ok');
+    renderPlayers();
   });
   SPY.on('game:night', (d) => {
     G.phase = 'night';

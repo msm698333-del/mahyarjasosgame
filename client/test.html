@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>بخش تست — صدا، ویس و بازی</title>
+<meta name="theme-color" content="#0b0817"/>
+<link rel="icon" href="favicon.svg"/>
+<link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<div class="stars"></div>
+<div class="container">
+  <header class="topbar"></header>
+  <div class="row-between" style="margin-top:8px">
+    <h1 class="page-title" style="margin:6px 0">بخش تست</h1>
+    <a class="btn btn-sm btn-ghost" href="home.html">بازگشت</a>
+  </div>
+
+  <div class="card anim-in">
+    <div class="card-title"><span class="dot"></span>۱) تست میکروفون و ویس</div>
+    <div class="muted small" id="rtc-status">…</div>
+    <div class="test-row">
+      <button class="btn" id="mic-btn">روشن کردن میکروفون</button>
+      <button class="btn btn-ghost" id="rec-btn" disabled>ضبط ۳ ثانیه و پخش</button>
+    </div>
+    <div class="meter" title="سطح صدای میکروفون"><div class="meter-fill" id="mic-meter"></div></div>
+    <div class="muted small" id="mic-status">میکروفون خاموش است.</div>
+  </div>
+
+  <div class="card anim-in">
+    <div class="card-title"><span class="dot"></span>۲) تست صداهای بازی</div>
+    <div class="muted small">با اولین لمس صفحه، مرورگر اجازه پخش صدا را می‌دهد. هر دکمه را جدا تست کن.</div>
+    <div class="field"><label>افکت‌ها (SFX)</label><div class="sound-grid" id="sfx-grid"></div></div>
+    <div class="field"><label>موسیقی‌ها (هر کدام تا وقتی دکمه بعدی را بزنی پخش می‌شود)</label><div class="sound-grid" id="music-grid"></div></div>
+  </div>
+
+  <div class="card anim-in">
+    <div class="card-title"><span class="dot"></span>۳) بازی آزمایشی ۲ نفره</div>
+    <div class="muted small">
+      اتاق آزمایشی: ۲ نفره، ورود رایگان، بدون کم‌وزیاد شدن سکه‌ها و آمار — فقط برای تست.
+      برای تست ویس دو نفره: بازی را بساز، «لینک دعوت» را در لابی کپی کن و روی گوشی/تب دوم بازش کن؛
+      بعد هر دو در لابی یا مسابقه دکمه «ورود به گفتگوی صوتی» را بزنید.
+    </div>
+    <button class="btn btn-gold btn-lg btn-block" id="test-game-btn" style="margin-top:10px">ساخت اتاق آزمایشی ۲ نفره</button>
+    <div class="hint" id="test-game-status"></div>
+  </div>
+
+  <div class="card anim-in">
+    <div class="card-title"><span class="dot"></span>راهنمای تست ویس دو نفره</div>
+    <div class="t-steps">
+      <div class="t-step"><b>۱.</b> میکروفون مرورگر اجازه داده شود (بند ۱ بالا سبز باشد).</div>
+      <div class="t-step"><b>۲.</b> «ساخت اتاق آزمایشی ۲ نفره» را بزن.</div>
+      <div class="t-step"><b>۳.</b> در لابی، «کپی لینک دعوت» را بزن و روی دستگاه دوم بازش کن.</div>
+      <div class="t-step"><b>۴.</b> هر دو نفر دکمه «ورود به گفتگوی صوتی» را بزنند.</div>
+      <div class="t-step"><b>۵.</b> حرف بزن — دایره سبز کنار نام هرکس یعنی صدایش می‌آید.</div>
+      <div class="t-step"><b>نکته:</b> اگر صدا رد و بدل نشد، هر دو روی اینترنت قوی‌تر وصل شو (ویس مستقیم P2P است) و دوباره وارد گفتگو شو.</div>
+    </div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="vendor/socket.io.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/test.js"></script>
+</body>
+</html>

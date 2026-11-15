@@ -30,6 +30,16 @@
     <p class="center muted small">این کارت فقط برای توست — به کسی نشانش نده!</p>
   </div>
 
+  <div class="card voice-card" id="voice-card">
+    <div class="voice-row">
+      <button class="btn btn-sm" id="voice-join">ورود به گفتگوی صوتی</button>
+      <button class="btn btn-sm btn-ghost" id="voice-mic" style="display:none">قطع میکروفون</button>
+      <span class="vs-dot" id="voice-me" title="صدای من"></span>
+      <span class="muted small" id="voice-count"></span>
+    </div>
+    <div class="muted small" id="voice-hint" style="display:none;margin-top:6px">صدا مستقیم بین بازیکنان رد و بدل می‌شود. هر وقت خواستی میکروفون را قطع کن.</div>
+  </div>
+
   <div class="card" id="players-card">
     <div class="card-title"><span class="dot"></span>بازیکن‌ها <span class="muted small" id="pg-hint"></span></div>
     <div class="players-grid" id="players"></div>
@@ -51,6 +61,7 @@
 <script src="vendor/socket.io.min.js"></script>
 <script src="js/core.js"></script>
 <script src="js/audio.js"></script>
+<script src="js/voice.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

@@ -33,11 +33,11 @@
       )
       .join('');
     const order = (over.order || [])
-      .map(
-        (e, i) =>
-          `<div class="hist-row"><span class="result-badge ${e.role === 'spy' ? 'loss' : 'win'}">${e.role === 'spy' ? 'جاسوس' : 'شهروند'}</span>
-          <div class="h-main"><div class="h-title">${SPY.esc(e.name)} حذف شد</div><div class="h-sub">روز ${SPY.fa(e.day)} · ${e.by === 'night' ? 'حذف شبانه' : 'رأی بازیکن‌ها'}</div></div></div>`
-      )
+      .map((e) => {
+        const byTxt = e.by === 'night' ? 'حذف شبانه' : e.by === 'shot' ? 'شات جاسوس' : e.by === 'declare' ? 'اعلام اشتباه جاسوس' : 'رأی بازیکن‌ها';
+        return `<div class="hist-row"><span class="result-badge ${e.role === 'spy' ? 'loss' : 'win'}">${e.role === 'spy' ? 'جاسوس' : 'شهروند'}</span>
+          <div class="h-main"><div class="h-title">${SPY.esc(e.name)} حذف شد</div><div class="h-sub">روز ${SPY.fa(e.day)} · ${byTxt}</div></div></div>`;
+      })
       .join('');
     box.innerHTML = `
       <div class="card anim-in center" style="border-color:${win ? 'rgba(52,211,153,0.5)' : 'rgba(251,113,133,0.5)'}">
@@ -67,7 +67,7 @@
       parity: 'جاسوس‌ها به تعداد شهروندها رسیده و کنترل بازی را گرفتند.',
       word_guessed: 'جاسوس کلمه مخفی را درست حدس زد.',
     };
-    document.getElementById('over-reason').textContent = reasons[over.reason] || '';
+    document.getElementById('over-reason').textContent = (reasons[over.reason] || '') + (over.test ? ' · اتاق آزمایشی بود — بدون سکه و آمار' : '');
     const rb = document.getElementById('rematch-btn');
     if (rb) {
       rb.onclick = async () => {

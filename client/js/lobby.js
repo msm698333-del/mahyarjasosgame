@@ -33,6 +33,15 @@
       SPY.toast('کد: ' + code);
     }
   };
+  document.getElementById('invite-btn').onclick = async () => {
+    try {
+      const link = new URL('join.html?code=' + code, location.href).href;
+      await navigator.clipboard.writeText(link);
+      SPY.toast('لینک دعوت کپی شد — بازش کنند و مستقیم وارد لابی شوند.', 'ok');
+    } catch (e) {
+      SPY.toast('کپی نشد؛ کد را دستی بفرست: ' + code, 'err');
+    }
+  };
 
   function chipRow(elId, values, current, onPick) {
     const box = document.getElementById(elId);
@@ -45,16 +54,19 @@
   }
 
   function render(S) {
+    const minSlots = S.test ? 2 : SLOTS_MIN;
+    document.getElementById('test-badge').style.display = S.test ? '' : 'none';
     document.getElementById('count-info').textContent =
-      `${SPY.fa(S.players.length)} از ${SPY.fa(S.slots)} بازیکن حاضر${S.players.length >= SLOTS_MIN ? ' — می‌شود شروع کرد' : ''}`;
+      `${SPY.fa(S.players.length)} از ${SPY.fa(S.slots)} بازیکن حاضر${S.players.length >= minSlots ? ' — می‌شود شروع کرد' : ` — حداقل ${SPY.fa(minSlots)} نفر`}`;
     document.getElementById('fee-info').textContent =
-      S.fee === 0 ? 'ورود رایگان' : `هزینه ورود: ${SPY.fa(S.fee)} سکه (رایگان‌ها مستثنا)`;
+      S.test ? 'اتاق آزمایشی: ورود رایگان' : S.fee === 0 ? 'ورود رایگان' : `هزینه ورود: ${SPY.fa(S.fee)} سکه (رایگان‌ها مستثنا)`;
 
     const grid = document.getElementById('players');
     grid.className = 'players-grid' + (S.players.length === 4 ? ' n4' : '');
     grid.innerHTML = '';
     S.players.forEach((pl) => {
       const card = SPY.el('div', 'player-card' + (pl.connected ? '' : ' dead'));
+      card.dataset.pid = pl.id; // برای نشانگر «در حال صحبت» ویس
       const frame = SPY.avatar(pl.avatar, 52, { status: pl.connected });
       card.appendChild(frame);
       const nm = SPY.el('div', 'pc-name');
@@ -80,11 +92,15 @@
     document.getElementById('host-settings').style.display = isHost ? '' : 'none';
     document.getElementById('host-panel').style.display = isHost ? '' : 'none';
     if (isHost) {
-      chipRow('slots-chips', Array.from({ length: SLOTS_MAX - SLOTS_MIN + 1 }, (_, i) => i + SLOTS_MIN), S.slots, (v) => SPY.emit('room:slots', { slots: v }));
-      chipRow('fee-chips', FEES, S.fee, (v) => SPY.emit('room:fee', { fee: v }));
+      chipRow('slots-chips', Array.from({ length: SLOTS_MAX - minSlots + 1 }, (_, i) => i + minSlots), S.slots, (v) => SPY.emit('room:slots', { slots: v }));
+      document.getElementById('fee-field').style.display = S.test ? 'none' : '';
+      if (!S.test) chipRow('fee-chips', FEES, S.fee, (v) => SPY.emit('room:fee', { fee: v }));
       const startBtn = document.getElementById('start-btn');
       startBtn.disabled = !S.canStart;
       startBtn.textContent = S.canStart ? 'شروع بازی' : 'منتظر بازیکن‌های بیشتر…';
+      document.getElementById('start-hint').textContent = S.test
+        ? 'اتاق آزمایشی: با ۲ بازیکن شروع می‌شود.'
+        : `حداقل ${SPY.fa(minSlots)} بازیکن لازم است.`;
     }
   }
 

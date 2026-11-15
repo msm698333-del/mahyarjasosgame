@@ -73,6 +73,12 @@
   };
 
   input.focus();
+  // ورود از لینک دعوت: ?code=XXXXXX
+  const pre = (new URLSearchParams(location.search).get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  if (pre) {
+    input.value = pre;
+    input.dispatchEvent(new Event('input'));
+  }
   // اتصال سوکت برای استعلام کد
   SPY.connectSocket();
   SPY.on('connect', () => { if (input.value.length === 6) lookup(); });
