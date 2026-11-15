@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>بازی دوز — کسب سکه</title>
+<meta name="theme-color" content="#0b0817"/>
+<link rel="icon" href="favicon.svg"/>
+<link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<div class="stars"></div>
+<div class="container">
+  <header class="topbar"></header>
+  <a class="back-link" href="home.html">→ بازگشت</a>
+  <h1 class="page-title">بازی دوز</h1>
+  <p class="page-sub">برد = سکه. با سکه می‌توانی وارد لابی‌ها شوی و آواتار بخرِی.</p>
+  <div class="bad" id="ref-note" style="display:none">ورود به لابی‌ها بعد از اتمام ورودهای رایگان، سکه لازم دارد — اینجا سکه جمع کن!</div>
+
+  <div class="card">
+    <div class="chips" id="mode-tabs">
+      <button class="chip active" data-mode="ai">مقابل هوش مصنوعی</button>
+      <button class="chip" data-mode="pvp">آنلاین دو‌نفره</button>
+    </div>
+    <div id="ai-setup">
+      <div class="divider"></div>
+      <div class="field">
+        <label>سطح دشواری و پاداش هر برد</label>
+        <div class="chips" id="diff-chips">
+          <button class="chip" data-diff="easy">آسان — ۲ سکه</button>
+          <button class="chip active" data-diff="normal">متوسط — ۴ سکه</button>
+          <button class="chip" data-diff="hard">سخت — ۶ سکه</button>
+        </div>
+      </div>
+      <div class="hint" id="cap-info"></div>
+      <button class="btn btn-primary btn-block btn-lg" id="ai-start">شروع بازی با هوش مصنوعی</button>
+    </div>
+    <div id="pvp-setup" style="display:none">
+      <div class="divider"></div>
+      <div class="hint">با یک بازیکن آنلاین دیگر هم‌تراز می‌شوی. برد = ۵ سکه (تا ۴ برد در روز).</div>
+      <button class="btn btn-primary btn-block btn-lg" id="pvp-queue">ورود به صف بازی آنلاین</button>
+    </div>
+  </div>
+
+  <div class="card" id="board-card" style="display:none">
+    <div class="row-between">
+      <div class="panel-hint" id="board-status" style="margin:0;flex:1">—</div>
+      <span class="conn-state" id="conn"><span class="cs-dot"></span></span>
+    </div>
+    <div class="ttt-board" id="board"></div>
+    <div id="board-result" class="center"></div>
+    <button class="btn btn-ghost btn-block" id="board-leave" style="display:none">اتمام بازی</button>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="vendor/socket.io.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/ttt.js"></script>
+</body>
+</html>

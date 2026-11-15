@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>ورود با کد لابی — بازی جاسوس</title>
+<meta name="theme-color" content="#0b0817"/>
+<link rel="icon" href="favicon.svg"/>
+<link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<div class="stars"></div>
+<div class="container">
+  <header class="topbar"></header>
+  <a class="back-link" href="home.html">→ بازگشت</a>
+  <h1 class="page-title">ورود با کد لابی</h1>
+  <p class="page-sub">کد ۶ رقمی لابی را از دوستت بگیر و وارد کن.</p>
+
+  <div class="card">
+    <div class="field">
+      <label for="code-input">کد لابی</label>
+      <input class="input" id="code-input" maxlength="6" placeholder="مثلاً: AX3K9P" autocomplete="off"
+        style="text-align:center; letter-spacing:8px; font-size:22px; font-weight:900" dir="ltr"/>
+    </div>
+    <div id="room-info" style="min-height:20px"></div>
+    <button class="btn btn-gold btn-lg btn-block" id="join-btn" style="margin-top:12px" disabled>ورود به لابی</button>
+    <div class="hint" id="join-msg"></div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="vendor/socket.io.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/join.js"></script>
+</body>
+</html>

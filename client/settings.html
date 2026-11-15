@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>تنظیمات صدا و ظاهر — بازی جاسوس</title>
+<meta name="theme-color" content="#0b0817"/>
+<link rel="icon" href="favicon.svg"/>
+<link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<div class="stars"></div>
+<div class="container">
+  <header class="topbar"></header>
+  <a class="back-link" href="home.html">→ بازگشت</a>
+  <h1 class="page-title">تنظیمات صدا و ظاهر</h1>
+
+  <div class="card anim-in">
+    <div class="card-title"><span class="dot"></span>صدا</div>
+    <div class="set-row">
+      <div class="sr-info">
+        <div class="sr-title">موسیقی</div>
+        <div class="sr-sub">موسیقی منو، لابی، شب و رأی‌گیری</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="music-toggle"/><span class="track"></span><span class="knob"></span></label>
+    </div>
+    <div class="set-row">
+      <div class="sr-info"><div class="sr-title">صدای موسیقی</div></div>
+      <input type="range" id="music-vol" min="0" max="100"/>
+    </div>
+    <div class="set-row">
+      <div class="sr-info">
+        <div class="sr-title">افکت‌های صوتی</div>
+        <div class="sr-sub">ورود، شروع، حذف، رأی، پایان (استیکرها بی‌صدا هستند)</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="sfx-toggle"/><span class="track"></span><span class="knob"></span></label>
+    </div>
+    <div class="set-row">
+      <div class="sr-info"><div class="sr-title">صدای افکت‌ها</div></div>
+      <input type="range" id="sfx-vol" min="0" max="100"/>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn btn-sm" id="test-music">تست موسیقی</button>
+      <button class="btn btn-sm" id="test-sfx">تست افکت</button>
+    </div>
+  </div>
+
+  <div class="card anim-in">
+    <div class="card-title"><span class="dot"></span>ظاهر</div>
+    <div class="set-row">
+      <div class="sr-info">
+        <div class="sr-title">کاهش انیمیشن‌ها</div>
+        <div class="sr-sub">مناسب برای گوشی‌های ضعیف‌تر</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="motion-toggle"/><span class="track"></span><span class="knob"></span></label>
+    </div>
+  </div>
+
+  <div class="card anim-in">
+    <div class="card-title"><span class="dot"></span>هویت این دستگاه</div>
+    <p class="muted small">هویت تو (نام، سکه‌ها، آواتارها) روی سرور ذخیره می‌شود و با کوکی امن/توکن امضاشده به همین دستگاه وصل است.</p>
+    <button class="btn btn-danger btn-block" id="clear-identity">پاک کردن هویت از این دستگاه</button>
+    <div class="hint">با پاک کردن، دفعه بعد با نام جدید و موجودی اولیه وارد می‌شوی. سکه‌های حساب فعلی از بین می‌رود.</div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/settings.js"></script>
+</body>
+</html>

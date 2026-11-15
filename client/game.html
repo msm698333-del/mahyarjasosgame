@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>مسابقه — بازی جاسوس</title>
+<meta name="theme-color" content="#0b0817"/>
+<link rel="icon" href="favicon.svg"/>
+<link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<div class="stars"></div>
+<div class="container" style="max-width:700px">
+  <header class="topbar"></header>
+  <div class="row-between" style="margin-top:6px">
+    <span class="conn-state" id="conn"><span class="cs-dot"></span><span id="conn-text">در حال اتصال…</span></span>
+    <button class="btn btn-sm btn-ghost" id="leave-btn">خروج از بازی</button>
+  </div>
+
+  <div class="phase-banner" id="phase-banner">
+    <div style="min-width:0">
+      <div class="pb-title" id="pb-title">در حال آماده‌سازی…</div>
+      <div class="pb-sub" id="pb-sub"></div>
+    </div>
+    <div id="timer-slot"></div>
+  </div>
+
+  <div class="card" id="role-card-box" style="display:none">
+    <div class="role-card-wrap" id="role-card-wrap"></div>
+    <p class="center muted small">این کارت فقط برای توست — به کسی نشانش نده!</p>
+  </div>
+
+  <div class="card" id="players-card">
+    <div class="card-title"><span class="dot"></span>بازیکن‌ها <span class="muted small" id="pg-hint"></span></div>
+    <div class="players-grid" id="players"></div>
+    <div class="muted small" id="private-line" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card" id="qa-card">
+    <div class="card-title"><span class="dot"></span>سؤال و پاسخ</div>
+    <div id="bubbles"></div>
+    <div id="action-panel" class="action-panel"></div>
+  </div>
+
+  <div class="card" id="sticker-card" style="display:none">
+    <div class="card-title"><span class="dot"></span>استیکر — هر ترم یکی <span class="muted small" id="sticker-note"></span></div>
+    <div class="sticker-bar" id="sticker-bar"></div>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="vendor/socket.io.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>

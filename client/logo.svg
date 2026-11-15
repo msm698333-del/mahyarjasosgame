@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 170" role="img" aria-label="SPY">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="55%" stop-color="#f5c542"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="hcol" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3b2d6e"/>
+      <stop offset="100%" stop-color="#1c1440"/>
+    </linearGradient>
+  </defs>
+  <!-- کلاه فدورا -->
+  <ellipse cx="104" cy="56" rx="66" ry="13" fill="url(#hcol)"/>
+  <path d="M56,54 Q56,12 104,12 Q152,12 152,54 Z" fill="url(#hcol)"/>
+  <rect x="56" y="42" width="96" height="12" rx="5" fill="url(#gold)"/>
+  <ellipse cx="104" cy="56" rx="66" ry="13" fill="none" stroke="#0d0818" stroke-width="2.5"/>
+  <path d="M56,54 Q56,12 104,12 Q152,12 152,54" fill="none" stroke="#0d0818" stroke-width="2.5"/>
+  <!-- ذره‌بین -->
+  <circle cx="178" cy="96" r="26" fill="#12102a" stroke="url(#gold)" stroke-width="7"/>
+  <circle cx="172" cy="90" r="8" fill="#f5c54222"/>
+  <line x1="196" y1="114" x2="220" y2="140" stroke="url(#gold)" stroke-width="9" stroke-linecap="round"/>
+  <!-- حروف SPY -->
+  <g stroke="url(#gold)" stroke-width="9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26,104 C10,104 10,124 26,124 C42,124 42,144 26,144 C16,144 10,140 8,136"/>
+    <path d="M56,144 L56,104 L74,104 Q86,104 86,115 Q86,126 74,126 L56,126"/>
+    <path d="M104,104 L120,126 L136,104 M120,126 L120,144"/>
+  </g>
+  <!-- خط تزئینی -->
+  <path d="M8,158 L232,158" stroke="#f5c542" stroke-width="2" opacity="0.35" stroke-dasharray="10 8"/>
+</svg>

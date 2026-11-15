@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>لابی — بازی جاسوس</title>
+<meta name="theme-color" content="#0b0817"/>
+<link rel="icon" href="favicon.svg"/>
+<link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<div class="stars"></div>
+<div class="container">
+  <header class="topbar"></header>
+  <div class="row-between" style="margin-top:8px">
+    <h1 class="page-title" style="margin:6px 0">اتاق انتظار</h1>
+    <span class="conn-state" id="conn"><span class="cs-dot"></span><span id="conn-text">در حال اتصال…</span></span>
+  </div>
+
+  <div class="card anim-in">
+    <div class="row-between">
+      <div>
+        <div class="muted small">کد لابی — به دوستانت بده</div>
+        <div style="font-size:30px;font-weight:900;letter-spacing:7px;direction:ltr;text-align:right" id="lobby-code">------</div>
+      </div>
+      <button class="btn btn-sm" id="copy-btn">کپی کد</button>
+    </div>
+    <div class="divider"></div>
+    <div class="row-between">
+      <span class="muted small" id="count-info">—</span>
+      <span class="muted small" id="fee-info">—</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="dot"></span>بازیکن‌ها</div>
+    <div class="players-grid" id="players"></div>
+    <div id="host-settings" style="display:none">
+      <div class="divider"></div>
+      <div class="field">
+        <label>ظرفیت لابی</label>
+        <div class="chips" id="slots-chips"></div>
+      </div>
+      <div class="field">
+        <label>هزینه ورود (سکه)</label>
+        <div class="chips" id="fee-chips"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <button class="btn btn-gold btn-lg btn-block" id="ready-btn">آماده‌ام!</button>
+    <div id="host-panel" style="display:none;margin-top:10px">
+      <button class="btn btn-primary btn-lg btn-block" id="start-btn">شروع بازی</button>
+      <div class="hint" id="start-hint">حداقل ۴ بازیکن لازم است.</div>
+    </div>
+    <button class="btn btn-ghost btn-block" id="leave-btn" style="margin-top:10px">خروج از لابی</button>
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="vendor/socket.io.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/lobby.js"></script>
+</body>
+</html>
