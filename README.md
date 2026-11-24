@@ -44,27 +44,33 @@ node scripts/smoke_e2e_cloudflare.mjs   # تست دود E2E با ۳ کلاینت
 
 ## استقرار روی Cloudflare
 
-1. **D1 (اختیاری ولی توصیه‌شده — تاریخچهٔ بازی‌ها):**
-   ```bash
-   npx wrangler d1 create spy-game-db
-   npx wrangler d1 execute spy-game-db --remote --file migrations/0001_init.sql
-   ```
-   `database_id` خروجی را در `wrangler.jsonc` جای `SET_D1_ID` بگذارید.
-   اگر D1 را نمی‌خواهید، بلوک `d1_databases` را از `wrangler.jsonc` حذف کنید — بازی بدون آن کامل است.
+راهنمای کامل و گام‌به‌گام: [`docs/DEPLOY_CLOUDFLARE.md`](docs/DEPLOY_CLOUDFLARE.md)
 
-2. **TURN (اختیاری — برای شبکه‌های سخت‌گیر):**
-   ```bash
-   npx wrangler secret put TURN_URLS       # مثل: turn:turn.cloudflare.com:3478?transport=udp
-   npx wrangler secret put TURN_USERNAME
-   npx wrangler secret put TURN_CREDENTIAL
-   ```
-   بدون این Secrets فقط STUN فعال است که در اکثر شبکه‌ها کافی است. (برای TURN واقعی می‌توانید از Cloudflare Calls TURN استفاده کنید.) هیچ اتصال فرضی در کد وجود ندارد.
+پروژه آمادهٔ انتشار **بدون هیچ تنظیم اضافه** است (D1 و TURN هر دو اختیاری‌اند):
 
-3. **انتشار:**
-   ```bash
-   npm run deploy        # = vite build + wrangler deploy
-   ```
-   یا اتصال ریپو به Cloudflare Dashboard (Workers & Pages → Create → Connect to Git) با دستور build `npm run build` و خروجی پیش‌فرض wrangler.
+**روش ۱ — اتصال GitHub به Cloudflare (بدون ترمینال — پیشنهادی):**
+داشبورد Cloudflare → **Workers & Pages → Create → Import a repository** → انتخاب همین ریپو با Build command ‏`npm run build` → Deploy.
+آدرس بازی: `https://mahyarjasos.<نام-اکانت>.workers.dev` — هر push بعدی خودکار منتشر می‌شود.
+
+**روش ۲ — Wrangler از کامپیوتر خودتان:**
+```bash
+npm install
+npx wrangler login     # یک بار ورود از مرورگر
+npm run deploy         # = vite build + wrangler deploy
+```
+
+**اختیاری — D1 (تاریخچهٔ بازی‌ها):** در `wrangler.jsonc` بلوک کامنت‌شدهٔ `d1_databases` را از کامنت خارج کنید، شناسهٔ خروجی `npx wrangler d1 create spy-game-db` را جای `DATABASE_ID_HERE` بگذارید و جدول‌ها را بسازید:
+```bash
+npx wrangler d1 execute spy-game-db --remote --file migrations/0001_init.sql
+```
+
+**اختیاری — TURN (برای شبکه‌های سخت‌گیر):**
+```bash
+npx wrangler secret put TURN_URLS       # مثل: turn:turn.cloudflare.com:3478?transport=udp
+npx wrangler secret put TURN_USERNAME
+npx wrangler secret put TURN_CREDENTIAL
+```
+بدون این Secrets فقط STUN فعال است که در اکثر شبکه‌ها کافی است. (برای TURN واقعی می‌توانید از Cloudflare Calls TURN استفاده کنید.) هیچ اتصال فرضی در کد وجود ندارد.
 
 ## قوانین بازی
 
