@@ -68,6 +68,7 @@ export interface ApplyOk {
 }
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
 const shuffle = <T,>(arr: T[], rng: Rng): T[] => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -544,14 +545,23 @@ export function sendSticker(s: RoomState, playerId: string, id: string, d: Deps)
   return { changed: false, mutated: true, emits: [{ t: 'sticker', from: playerId, id, ts: d.now }] };
 }
 
-export function setVoice(s: RoomState, playerId: string, micOn: boolean, speaking: boolean): ApplyOk {
+export function setVoice(s: RoomState, playerId: string, micOn: boolean, speaking: boolean, joined?: boolean): ApplyOk {
   const p = playerById(s, playerId);
   if (!p) return { changed: false };
   const mic = micOn && !p.forceMuted;
-  if (p.micOn === mic && p.speaking === speaking) return { changed: false };
-  p.micOn = mic;
-  p.speaking = speaking;
-  return { changed: true };
+  let changed = false;
+  // پیوستن/ترک گفتگوی صوتی — تعیین‌کنندهٔ hasVoice برای همگام‌سازی peerهای WebRTC
+  if (joined === true && !p.hasVoice) { p.hasVoice = true; changed = true; }
+  if (joined === false && p.hasVoice) { p.hasVoice = false; changed = true; }
+  if (joined === false) {
+    // خروج کامل: میکروفن و گفتار هم خاموش می‌شود
+    if (p.micOn !== false || p.speaking !== false) { p.micOn = false; p.speaking = false; changed = true; }
+  } else if (p.micOn !== mic || p.speaking !== speaking) {
+    p.micOn = mic;
+    p.speaking = speaking;
+    changed = true;
+  }
+  return { changed };
 }
 
 /* ---------- آلارم‌ها و زمان‌بندی ---------- */
@@ -630,7 +640,7 @@ export function apply(s: RoomState, playerId: string | null, msg: C2S, d: Deps):
       return spyGuess(s, playerId, String(msg.locationId ?? ''), d);
     case 'voice': {
       if (!playerId) return { changed: false, err: ERR.BAD_MSG };
-      return setVoice(s, playerId, !!msg.micOn, !!msg.speaking);
+      return setVoice(s, playerId, !!msg.micOn, !!msg.speaking, msg.joined === undefined ? undefined : !!msg.joined);
     }
     case 'report':
       if (!playerId) return { changed: false, err: ERR.BAD_MSG };
