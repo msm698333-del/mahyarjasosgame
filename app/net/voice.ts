@@ -15,6 +15,31 @@ interface PeerInfo {
   polite: boolean; // طرف مقابل initiator است
   pendingCandidates: RTCIceCandidateInit[];
   pendingOffer: RTCSessionDescriptionInit | null;
+  lastAudioError: string | null;
+}
+
+export interface PeerDiag {
+  id: string;
+  pcState: string;          // connectionState
+  iceState: string;         // iceConnectionState
+  sigState: string;         // signalingState
+  remoteTracks: number;     // تعداد تراک صوتی دریافتی زنده
+  bytesSent: number;        // از getStats — صوت ارسالی
+  bytesReceived: number;    // از getStats — صوت دریافتی
+  pairType: string;         // نوع جفت candidate انتخاب‌شده (host/srflx/relay)
+  pendingCandidates: number; // صف candidateهای زودرس
+  lastAudioError: string | null;
+}
+
+export interface VoiceDiag {
+  joined: boolean;
+  micPermission: string;     // granted / denied / prompt / unknown
+  localTrackState: string;   // live / live-muted / ended / none
+  iceServersCount: number;
+  hasStun: boolean;
+  hasTurn: boolean;
+  lastAudioError: string | null;
+  peers: PeerDiag[];
 }
 
 interface VoiceStatus {
@@ -57,6 +82,7 @@ class VoiceManager {
   level = 0;
   micDeviceId: string | null = null;
   speakerDeviceId: string | null = null;
+  lastAudioError: string | null = null;
 
   private localStream: MediaStream | null = null;
   private peers = new Map<string, PeerInfo>();
@@ -66,6 +92,7 @@ class VoiceManager {
   private raf = 0;
   private listeners = new Set<(s: VoiceStatus) => void>();
   private lastSpeakSent = 0;
+  private gestureHandler: (() => void) | null = null;
 
   subscribe(fn: (s: VoiceStatus) => void): () => void {
     this.listeners.add(fn);
@@ -107,6 +134,9 @@ class VoiceManager {
     this.error = null;
     this.emit();
     try {
+      // مهم: پیکربندی ICE باید قبل از ساخت هر PeerConnection گرفته شود؛
+      // بدون STUN/TURN اتصال بین دو شبکهٔ متفاوت هرگز برقرار نمی‌شود.
+      await fetchIceServers();
       this.localStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: this.micDeviceId ? { exact: this.micDeviceId } : undefined,
@@ -120,9 +150,14 @@ class VoiceManager {
       this.joined = true;
       this.micOn = true;
       this.setupLocalAnalyser();
+      // تلاش مجدد پخش صدا با هر کلیک کاربر (خط‌مشی autoplay مرورگر)
+      if (!this.gestureHandler && typeof document !== 'undefined') {
+        this.gestureHandler = () => this.retryPlayback();
+        document.addEventListener('pointerdown', this.gestureHandler);
+      }
       this.emit();
-      // اطلاع به سرور برای هماهنگی لیست voice
-      this.onVoiceUpdate?.(true);
+      // اطلاع به سرور برای هماهنگی لیست voice (joined=true → hasVoice سمت سرور)
+      this.onVoiceUpdate?.(true, true);
     } catch (e) {
       this.error = micErrorText(e);
       this.joined = false;
@@ -134,7 +169,22 @@ class VoiceManager {
     }
   }
 
-  onVoiceUpdate: ((micOn: boolean) => void) | null = null;
+  onVoiceUpdate: ((micOn: boolean, joined?: boolean) => void) | null = null;
+
+  /** تلاش مجدد پخش صدا پس از gesture کاربر */
+  retryPlayback(): void {
+    for (const [, p] of this.peers) {
+      if (p.audio.srcObject && p.audio.paused) {
+        p.audio.play().then(() => {
+          p.lastAudioError = null;
+          this.lastAudioError = null;
+          this.emit();
+        }).catch((e) => {
+          p.lastAudioError = playErrText(e);
+        });
+      }
+    }
+  }
 
   leave(): void {
     for (const [, p] of this.peers) this.teardownPeer(p);
@@ -143,6 +193,10 @@ class VoiceManager {
     this.localStream = null;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    if (this.gestureHandler && typeof document !== 'undefined') {
+      document.removeEventListener('pointerdown', this.gestureHandler);
+      this.gestureHandler = null;
+    }
     this.ctx?.close().catch(() => { /* ignore */ });
     this.ctx = null;
     this.localAnalyser = null;
@@ -150,6 +204,9 @@ class VoiceManager {
     this.micOn = false;
     this.speaking = false;
     this.level = 0;
+    this.lastAudioError = null;
+    // اطلاع خروج کامل از گفتگو به سرور (joined=false → hasVoice=false و پاکسازی peerها در بقیه)
+    this.onVoiceUpdate?.(false, false);
     this.emit();
   }
 
@@ -236,6 +293,11 @@ class VoiceManager {
     // ساخت جدیدها
     for (const id of inVoice) {
       if (!this.peers.has(id)) this.createPeer(id);
+      else {
+        // همگام‌سازی وضعیت میکروفن هم‌بازی از state عمومی
+        const sp = state.players.find((x) => x.id === id);
+        if (sp) this.peers.get(id)!.micOn = sp.micOn;
+      }
     }
     this.emit();
   }
@@ -248,7 +310,8 @@ class VoiceManager {
     const info: PeerInfo = {
       pc, audio, analyser: null, stream: null,
       speaking: false, micOn: false, userMuted: false,
-      polite: true, pendingCandidates: [], pendingOffer: null
+      polite: true, pendingCandidates: [], pendingOffer: null,
+      lastAudioError: null
     };
     this.peers.set(peerId, info);
 
@@ -270,7 +333,14 @@ class VoiceManager {
       info.stream = ev.streams[0] ?? new MediaStream([ev.track]);
       audio.srcObject = info.stream;
       audio.muted = info.userMuted || this.deafened;
-      audio.play().catch(() => { /* gesture لازم است؛ کاربر با دکمهٔ صوت وارد شده */ });
+      audio.play().then(() => {
+        info.lastAudioError = null;
+        this.lastAudioError = null;
+      }).catch((e) => {
+        // خطای autoplay ثبت می‌شود و با اولین gesture کاربر تلاش مجدد می‌شود
+        info.lastAudioError = playErrText(e);
+        this.lastAudioError = info.lastAudioError;
+      });
       this.setupRemoteAnalyser(peerId, info);
       this.emit();
     };
@@ -308,6 +378,62 @@ class VoiceManager {
     } catch { /* ignore */ }
   }
 
+  /** جمع‌آوری دادهٔ عیب‌یابی زنده برای پنل Diagnostic */
+  async diagnostics(): Promise<VoiceDiag> {
+    let micPermission = 'unknown';
+    try {
+      const perm = await navigator.permissions?.query?.({ name: 'microphone' as PermissionName });
+      if (perm) micPermission = perm.state;
+    } catch { /* مرورگر پشتیبانی نمی‌کند */ }
+    const track = this.localStream?.getAudioTracks()[0];
+    const localTrackState = !track ? 'none' : track.readyState === 'live'
+      ? (track.muted ? 'live-muted' : 'live')
+      : track.readyState;
+    const servers = iceCache?.servers ?? [];
+    const peers: PeerDiag[] = [];
+    for (const [id, p] of this.peers) {
+      let bytesSent = 0;
+      let bytesReceived = 0;
+      let pairType = '—';
+      try {
+        const report = await p.pc.getStats();
+        const candIds: Record<string, string> = {};
+        report.forEach((s: RTCStats & { type?: string; kind?: string; bytesSent?: number; bytesReceived?: number; localCandidateId?: string; remoteCandidateId?: string; candidateType?: string; state?: string; selected?: boolean; nominated?: boolean }) => {
+          if (s.type === 'outbound-rtp' && s.kind === 'audio') bytesSent += s.bytesSent ?? 0;
+          if (s.type === 'inbound-rtp' && s.kind === 'audio') bytesReceived += s.bytesReceived ?? 0;
+          if (s.type === 'local-candidate' || s.type === 'remote-candidate') {
+            candIds[(s as { id?: string }).id ?? ''] = s.candidateType ?? '?';
+          }
+          if (s.type === 'candidate-pair' && (s.state === 'succeeded') && (s.selected || s.nominated)) {
+            pairType = `${candIds[s.localCandidateId ?? ''] ?? '?'}→${candIds[s.remoteCandidateId ?? ''] ?? '?'}`;
+          }
+        });
+      } catch { /* getStats در دسترس نیست */ }
+      const liveRemote = p.pc.getReceivers().filter((r) => r.track?.kind === 'audio' && r.track.readyState === 'live').length
+        || (p.stream ? p.stream.getAudioTracks().filter((t) => t.readyState === 'live').length : 0);
+      peers.push({
+        id,
+        pcState: p.pc.connectionState,
+        iceState: p.pc.iceConnectionState,
+        sigState: p.pc.signalingState,
+        remoteTracks: liveRemote,
+        bytesSent, bytesReceived, pairType,
+        pendingCandidates: p.pendingCandidates.length,
+        lastAudioError: p.lastAudioError
+      });
+    }
+    return {
+      joined: this.joined,
+      micPermission,
+      localTrackState,
+      iceServersCount: servers.length,
+      hasStun: servers.some((s) => Array.isArray(s.urls) ? s.urls.some((u) => u.startsWith('stun:')) : String(s.urls).startsWith('stun:')),
+      hasTurn: servers.some((s) => Array.isArray(s.urls) ? s.urls.some((u) => u.startsWith('turn')) : String(s.urls).startsWith('turn')),
+      lastAudioError: this.lastAudioError,
+      peers
+    };
+  }
+
   private setupRemoteAnalyser(peerId: string, info: PeerInfo): void {
     if (!info.stream || !this.ctx) return;
     try {
@@ -321,6 +447,7 @@ class VoiceManager {
 
   private startLevelLoop(): void {
     if (this.raf) return;
+    if (typeof requestAnimationFrame !== 'function') return; // محیط بدون rAF (تست‌های node)
     let last = 0;
     const loop = (ts: number) => {
       this.raf = requestAnimationFrame(loop);
@@ -430,5 +557,13 @@ function micErrorText(e: unknown): string {
   return 'خطا در دسترسی به میکروفن.';
 }
 
+function playErrText(e: unknown): string {
+  const name = (e as DOMException)?.name;
+  if (name === 'NotAllowedError') return 'پخش صدا مسدود شد (autoplay)؛ یک بار روی صفحه کلیک کنید.';
+  if (name === 'NotSupportedError') return 'این مرورگر این قالب صوتی را پشتیبانی نمی‌کند.';
+  return 'خطای پخش صدا.';
+}
+
 export const voice = new VoiceManager();
+export { VoiceManager };
 export type { VoiceStatus };
