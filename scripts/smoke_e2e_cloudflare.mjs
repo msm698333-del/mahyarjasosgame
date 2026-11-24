@@ -145,10 +145,19 @@ async function main() {
   const sigLeak = await host.wait((m) => m.t === 'vsig', 700);
   ok('vsig به بقیه نشت نکرد', !sigLeak);
 
-  // ۱۱) وضعیت صدا
-  p2.send({ t: 'voice', micOn: true, speaking: false });
+  // ۱۱) وضعیت صدا + پیوستن/ترک گفتگو (hasVoice ← joined)
+  p2.send({ t: 'voice', micOn: true, speaking: false, joined: true });
   const voiceState = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w2.you.id)?.micOn === true);
   ok('وضعیت میکروفن همگام شد', !!voiceState);
+  const hasVOn = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w2.you.id)?.hasVoice === true);
+  ok('joined=true → hasVoice=true پخش شد (کلید همگام‌سازی peerها)', !!hasVOn);
+  p2.send({ t: 'voice', micOn: false, speaking: false, joined: false });
+  const hasVOff = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w2.you.id)?.hasVoice === false);
+  ok('joined=false → hasVoice=false و میکروفن خاموش', !!hasVOff);
+  // بازگشت به صوت برای ادامهٔ سناریو
+  p2.clear();
+  p2.send({ t: 'voice', micOn: true, speaking: false, joined: true });
+  await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w2.you.id)?.hasVoice === true);
 
   // ۱۲) اتصال مجدد p3 با token
   p3.ws.close();
