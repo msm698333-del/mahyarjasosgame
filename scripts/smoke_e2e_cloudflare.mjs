@@ -3,6 +3,7 @@
 // اجرا: node scripts/smoke_e2e_cloudflare.mjs  (پیش‌فرض 127.0.0.1:8787؛ با SPY_BASE تغییر دهید)
 
 const BASE = process.env.SPY_BASE ?? 'http://127.0.0.1:8787';
+const WS_BASE = BASE.replace(/^http/, 'ws'); // http://… → ws://…
 const results = [];
 let failures = 0;
 
@@ -17,7 +18,7 @@ class TestClient {
   constructor(label) { this.label = label; this.msgs = []; this.ws = null; }
   connect(code) {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://${BASE.replace('http','ws')}/ws?code=${code}`);
+      const ws = new WebSocket(`${WS_BASE}/ws?code=${code}`);
       this.ws = ws;
       ws.onopen = () => resolve();
       ws.onerror = () => reject(new Error('ws error'));
