@@ -116,7 +116,7 @@ export type C2S =
   | { t: 'target'; targetId: string }
   | { t: 'vote'; targetId: string | null }
   | { t: 'spyGuess'; locationId: string }
-  | { t: 'voice'; micOn: boolean; speaking?: boolean }
+  | { t: 'voice'; micOn: boolean; speaking?: boolean; joined?: boolean }
   | { t: 'vsig'; to: string; data: unknown }
   | { t: 'report'; targetId: string }
   | { t: 'kick'; targetId: string }
