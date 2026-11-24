@@ -1,0 +1,43 @@
+// پیکربندی Cloudflare برای «بازی جاسوس»
+// استقرار: https://developers.cloudflare.com/workers/wrangler/configuration/
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mahyarjasos",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // فرانت React پس از build در dist/client قرار می‌گیرد و همان Worker آن را سرو می‌کند
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  // هر لابی = یک نمونه GameRoomDO (کد لابی = نام DO)
+  "durable_objects": {
+    "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoomDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoomDO"] }],
+
+  // تاریخچه بازی‌ها (اختیاری ولی توصیه‌شده):
+  // ۱) npx wrangler d1 create spy-game-db
+  // ۲) شناسه خروجی را جای «SET_D1_ID» بگذارید
+  // اگر D1 را نمی‌خواهید، این بلوک را حذف کنید — بازی بدون آن هم کامل کار می‌کند.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spy-game-db",
+      "database_id": "SET_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "observability": { "enabled": true }
+
+  // Secrets اختیاری TURN (برای شبکه‌های سخت‌گیر):
+  //   npx wrangler secret put TURN_URLS      مثال: turn:turn.cloudflare.com:3478?transport=udp
+  //   npx wrangler secret put TURN_USERNAME
+  //   npx wrangler secret put TURN_CREDENTIAL
+  // بدون این Secrets، بازی فقط با STUN کار می‌کند و در اکثر شبکه‌ها کافی است.
+}

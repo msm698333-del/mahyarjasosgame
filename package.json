@@ -1,22 +1,33 @@
 {
-  "name": "spy-online",
-  "version": "1.1.0",
-  "description": "بازی آنلاین چندنفره جاسوس (SPY) — فرانت استاتیک سازگار با Tiiny Host + بک‌اند Node.js (Express + Socket.IO) + دیتابیس SQLite",
+  "name": "spy-game-cf",
+  "version": "2.0.0",
   "private": true,
-  "type": "commonjs",
+  "type": "module",
+  "description": "بازی جاسوس — نسخه ابری Cloudflare Workers + Durable Objects + D1 + WebRTC",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node server/index.js",
-    "sim": "node scripts/simulate_game.js"
+    "dev:client": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
+    "test": "vitest run",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "express": "^4.21.2",
-    "socket.io": "^4.8.1"
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.5"
   },
   "devDependencies": {
-    "socket.io-client": "^4.8.1"
-  },
-  "engines": {
-    "node": ">=22.13"
+    "@cloudflare/workers-types": "^5.20261123.1",
+    "@tailwindcss/vite": "^4.1.10",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.5.2",
+    "tailwindcss": "^4.1.10",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.24.0"
   }
 }
