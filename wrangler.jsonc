@@ -20,18 +20,19 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoomDO"] }],
 
-  // تاریخچه بازی‌ها (اختیاری ولی توصیه‌شده):
-  // ۱) npx wrangler d1 create spy-game-db
-  // ۲) شناسه خروجی را جای «SET_D1_ID» بگذارید
-  // اگر D1 را نمی‌خواهید، این بلوک را حذف کنید — بازی بدون آن هم کامل کار می‌کند.
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "spy-game-db",
-      "database_id": "SET_D1_ID",
-      "migrations_dir": "migrations"
-    }
-  ],
+  // تاریخچهٔ بازی‌ها (D1) کاملاً اختیاری است — بازی بدون آن هم کامل کار می‌کند.
+  // برای فعال‌سازی بعدی این بلوک را از حالت کامنت خارج کنید:
+  //   ۱) npx wrangler d1 create spy-game-db
+  //   ۲) شناسهٔ خروجی را جای «DATABASE_ID_HERE» بگذارید
+  //   ۳) npx wrangler d1 execute spy-game-db --remote --file migrations/0001_init.sql
+  // "d1_databases": [
+  //   {
+  //     "binding": "DB",
+  //     "database_name": "spy-game-db",
+  //     "database_id": "DATABASE_ID_HERE",
+  //     "migrations_dir": "migrations"
+  //   }
+  // ],
 
   "observability": { "enabled": true }
 
