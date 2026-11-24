@@ -20,11 +20,11 @@ export default function App() {
   const you = useStore((s) => s.you);
   const [settings, setSettings] = useState(false);
 
-  // اطلاع وضعیت میکروفن به سرور
+  // اطلاع وضعیت میکروفن به سرور (joined: پیوستن/ترک کامل گفتگو → hasVoice سمت سرور)
   useEffect(() => {
-    voice.onVoiceUpdate = (micOn) => {
+    voice.onVoiceUpdate = (micOn, joined) => {
       const speaking = voice.status().speaking;
-      socket.send({ t: 'voice', micOn, speaking });
+      socket.send({ t: 'voice', micOn, speaking, ...(joined !== undefined ? { joined } : {}) });
     };
     return () => { voice.onVoiceUpdate = null; };
   }, []);
