@@ -2,7 +2,8 @@
 // همهٔ اعتبارسنجی‌ها سمت سرور همین‌جا انجام می‌شود؛ کلاینت هیچ‌وقت منبع حقیقت نیست.
 
 import { C2S, ERR, GameSettings, Phase, PublicState, RoleInfo, RoundResult, S2C, TallyInfo, YouInfo, DEFAULT_SETTINGS, EliminationInfo, ROUND_RESULT_SECONDS, SPY_WORD_GUESS } from './types';
-import { LocationDef, LOCATIONS, locationById, pickLocation, locationPoolSize } from './locations';
+import { Difficulty, pickWord, pickSpyWord, wordById, wordPoolSize, wordCategoryIds } from './wordBank';
+import { DAILY_QUOTA_SECONDS, TURN_COST_SECONDS, tehranDayKey } from './quota';
 import { genToken, newPlayerId, Rng } from './ids';
 
 export interface Player {
@@ -24,7 +25,11 @@ export interface Player {
   reports: number;
   reportedBy: Set<string>;
   role: RoleInfo | null;
+  deviceId?: string; // شناسهٔ پایدار دستگاه — برای سهمیهٔ روزانهٔ سراسری؛ هرگز به کلاینت‌ها پخش نمی‌شود
 }
+
+/** کلمهٔ فعال دور — از بانک کلمات می‌آید؛ شکل قدیمی location حفظ شده تا کلاینت و نتایج سازگار بمانند */
+export interface RoundWord { id: string; name: string; cat: string }
 
 export interface RoomState {
   code: string;
@@ -34,7 +39,7 @@ export interface RoomState {
   players: Player[];
   hostId: string;
   round: number;
-  location: LocationDef | null;
+  location: RoundWord | null;
   revealedAt: number | null;
   turnOrder: string[];
   currentTurnIdx: number;
@@ -55,12 +60,21 @@ export interface RoomState {
   lastChatAt: Record<string, number>;
   chainReturnIdx: number | null; // ادامهٔ چرخهٔ نوبت از این صندلی، بعد از پایان زنجیرهٔ چالش/واگذاری
   challengedIds: string[];       // بازیکنانی که با چالش/واگذاری وارد نوبت شده‌اند (حق واگذاری دارند)
-  usedLocationIds: string[];     // کلمه‌های اعلام‌شده در این لابی — قانون تکرارنکردن
+  usedLocationIds: string[];     // کلمه‌های اعلام‌شده در این لابی — قانون تکرارنشدن کلمه‌ها
+  quotaLeft: Record<string, number>; // سهمیهٔ روزانهٔ باقی‌ماندهٔ هر بازیکن (ثانیه) — کش سرور؛ منبع حقیقت در QuotaDO ذخیره می‌شود
+  turnNote: string | null;           // یادداشت گذرای نوبت (مثل ردّ خودکار به‌خاطر پایان سهمیه)
+}
+
+/** عملیات سهمیهٔ روزانه — روی کش سرور (quotaLeft) کار می‌کند؛ مصرف واقعی به QuotaDO منتقل و ذخیره می‌شود */
+export interface QuotaOps {
+  left: (playerId: string) => number;
+  consume: (playerId: string, seconds: number) => void;
 }
 
 export interface Deps {
   rng: Rng;
   now: number;
+  quota?: QuotaOps;
 }
 
 export interface ApplyOk {
@@ -98,7 +112,8 @@ export function createRoom(code: string, hostName: string, hostAvatar: number, d
     spyIds: [], readyIds: [], votes: {}, voteRound: 1, tiedIds: null, tally: null,
     lastElimination: null, roundNote: null, results: null,
     spyGuessId: null, lastStickerAt: {}, lastChatAt: {},
-    chainReturnIdx: null, challengedIds: [], usedLocationIds: []
+    chainReturnIdx: null, challengedIds: [], usedLocationIds: [],
+    quotaLeft: {}, turnNote: null
   };
 }
 
@@ -133,8 +148,16 @@ export function publicState(s: RoomState, now: number, viewerId?: string): Publi
     turnEndsAt: s.turnEndsAt ?? undefined, targetId: s.targetId, challengedIds: [...s.challengedIds],
     readyCount: s.readyIds.length, votesSubmitted: Object.keys(s.votes).length,
     voteRound: s.voteRound, tiedIds: s.tiedIds, tally: s.tally,
-    elimination: s.lastElimination, roundNote: s.roundNote, results: s.results
+    elimination: s.lastElimination, roundNote: s.roundNote, turnNote: s.turnNote, results: s.results
   };
+  // سهمیهٔ روزانه فقط برای خودِ بیننده محاسبه و ارسال می‌شود
+  if (viewerId && s.quotaLeft[viewerId] != null) {
+    ps.quota = {
+      remaining: Math.max(0, s.quotaLeft[viewerId] | 0),
+      total: DAILY_QUOTA_SECONDS,
+      day: tehranDayKey(now)
+    };
+  }
   if (viewerId && viewerId === s.hostId) {
     ps.hostView = { reports: Object.fromEntries(s.players.map((p) => [p.id, p.reports])) };
   }
@@ -158,6 +181,16 @@ function youInfo(s: RoomState, p: Player): YouInfo {
 export function currentSpeakerId(s: RoomState): string | null {
   if (s.phase !== 'discussion' || s.currentTurnIdx < 0) return null;
   return s.turnOrder[s.currentTurnIdx] ?? null;
+}
+
+/* ---------- سهمیهٔ روزانه ---------- */
+
+/** آیا بازیکن می‌تواند نوبت جدیدی شروع کند؟ (متصل، حذف‌نشده، سهمیهٔ کافی) — اعتبارسنجی کاملاً سمت سرور */
+function canTakeTurn(s: RoomState, pid: string, d: Deps): boolean {
+  const p = playerById(s, pid);
+  if (!p || !p.connected || p.eliminated) return false;
+  if (d.quota && d.quota.left(pid) < TURN_COST_SECONDS) return false; // پایان سهمیهٔ روزانه → نوبت جدید ممنوع
+  return true;
 }
 
 /* ---------- ورود / خروج ---------- */
@@ -237,12 +270,16 @@ export function updateSettings(s: RoomState, actorId: string, patch: Partial<Gam
   if (patch.discussionSeconds !== undefined) st.discussionSeconds = clamp(patch.discussionSeconds | 0, 180, 900);
   if (patch.voteSeconds !== undefined) st.voteSeconds = clamp(patch.voteSeconds | 0, 15, 120);
   if (patch.guessSeconds !== undefined) st.guessSeconds = clamp(patch.guessSeconds | 0, 30, 90);
-  if (patch.turnSeconds !== undefined) st.turnSeconds = clamp(patch.turnSeconds | 0, 15, 120);
+  // قانون تایمر: هر نوبت دقیقاً ۱۰ ثانیه است — قفل سراسری؛ هیچ بازیکنی نمی‌تواند تایمر را متوقف یا تمدید کند
+  st.turnSeconds = 10;
   if (patch.skipPerPlayer !== undefined) st.skipPerPlayer = clamp(patch.skipPerPlayer | 0, 0, 5);
   if (patch.spyWord !== undefined && (patch.spyWord === 'nearby' || patch.spyWord === 'none')) st.spyWord = patch.spyWord;
+  if (patch.difficulty !== undefined && (patch.difficulty === 'easy' || patch.difficulty === 'medium' || patch.difficulty === 'hard')) {
+    st.difficulty = patch.difficulty;
+  }
   if (patch.categories !== undefined && Array.isArray(patch.categories)) {
-    const valid = new Set(['public', 'education', 'fun', 'food', 'health', 'historic', 'sport', 'travel', 'fantasy']);
-    st.categories = patch.categories.filter((c) => valid.has(c)).slice(0, 9);
+    const valid = new Set<string>(wordCategoryIds());
+    st.categories = patch.categories.filter((c) => valid.has(c)).slice(0, wordCategoryIds().length);
   }
   if (st.spyCount === 2 && st.maxPlayers < 6) st.maxPlayers = 6;
   s.settings = st;
@@ -255,13 +292,6 @@ export function updateSettings(s: RoomState, actorId: string, patch: Partial<Gam
 /** فازهایی که بازی در جریان است (برای بررسی برد/باخت هنگام خروج بازیکن) */
 const MATCH_PHASES: Set<Phase> = new Set(['revealing', 'discussion', 'voting', 'spyGuess', 'roundResult']);
 
-/** کلمهٔ نزدیک برای جاسوس — ترجیحاً از همان دستهٔ مکان شهروندها، ولی متفاوت */
-function pickDecoyWord(base: LocationDef, rng: Rng): string {
-  const sameCat = LOCATIONS.filter((l) => l.cat === base.cat && l.id !== base.id);
-  const pool = sameCat.length > 0 ? sameCat : LOCATIONS.filter((l) => l.id !== base.id);
-  return pool[Math.floor(rng() * pool.length)].name;
-}
-
 export function startRound(s: RoomState, d: Deps): ApplyOk & { err?: string } {
   if (s.phase !== 'waiting' && s.phase !== 'roundResult') return { changed: false, err: ERR.WRONG_PHASE };
   const active = s.players.filter((p) => p.connected && !p.eliminated);
@@ -273,12 +303,12 @@ export function startRound(s: RoomState, d: Deps): ApplyOk & { err?: string } {
     for (const p of s.players) p.eliminated = false;
   }
   const spyCount = Math.min(s.settings.spyCount, Math.floor(active.length / 3) || 1);
-  // قانون تکرارنکردن: کلمهٔ اعلام‌شدهٔ قبلی دوباره انتخاب نمی‌شود تا بانک دسته‌ها تمام شود
+  // قانون تکرارنشدن کلمه‌ها: کلمهٔ اعلام‌شدهٔ قبلی دوباره انتخاب نمی‌شود تا بانک دسته‌ها تمام شود
   const catIds = s.settings.categories.length ? s.settings.categories : null;
-  if (s.usedLocationIds.length >= locationPoolSize(catIds)) s.usedLocationIds = [];
-  const loc = pickLocation(catIds, d.rng, s.usedLocationIds);
-  if (!loc) return { changed: false, err: 'no_location' };
-  s.usedLocationIds.push(loc.id);
+  if (s.usedLocationIds.length >= wordPoolSize(catIds)) s.usedLocationIds = [];
+  const w = pickWord(catIds, d.rng, s.usedLocationIds);
+  if (!w) return { changed: false, err: 'no_location' };
+  s.usedLocationIds.push(w.id);
 
   let spyIds = s.spyIds.filter((id) => active.some((p) => p.id === id));
   if (freshMatch) {
@@ -291,7 +321,7 @@ export function startRound(s: RoomState, d: Deps): ApplyOk & { err?: string } {
   }
   s.spyIds = spyIds;
 
-  s.location = loc;
+  s.location = { id: w.id, name: w.word, cat: w.cat };
   s.round += 1;
   s.phase = 'revealing';
   s.revealedAt = d.now;
@@ -306,13 +336,14 @@ export function startRound(s: RoomState, d: Deps): ApplyOk & { err?: string } {
   s.readyIds = [];
   s.lastElimination = null;
   s.roundNote = null;
+  s.turnNote = null;
   s.chainReturnIdx = null;
   s.challengedIds = [];
 
   const order = shuffle(active.map((p) => p.id), d.rng);
   const spySet = new Set(spyIds);
-  // کلمهٔ جاسوس: نزدیک به کلمهٔ اصلی (تنظیم‌شدنی) — یا هیچ
-  const decoyWord = s.settings.spyWord === 'nearby' ? pickDecoyWord(loc, d.rng) : null;
+  // کلمهٔ جاسوس: نزدیک به کلمهٔ اصلی بر اساس سطح سختی (آسان/متوسط/سخت) — یا هیچ؛ جاسوس هرگز کلمهٔ اصلی را نمی‌بیند
+  const decoyWord = s.settings.spyWord === 'nearby' ? pickSpyWord(w, s.settings.difficulty, d.rng) : null;
 
   // تخصیص کلمه: همهٔ شهروندها دقیقاً یک کلمهٔ یکسان می‌گیرند؛ فقط جاسوس متفاوت است
   for (const p of s.players) {
@@ -322,7 +353,7 @@ export function startRound(s: RoomState, d: Deps): ApplyOk & { err?: string } {
     if (spySet.has(p.id)) {
       p.role = decoyWord ? { isSpy: true, roleName: decoyWord } : { isSpy: true };
     } else {
-      p.role = { isSpy: false, locationId: loc.id, locationName: loc.name, locationCategory: loc.cat };
+      p.role = { isSpy: false, locationId: w.id, locationName: w.word, locationCategory: w.cat };
     }
   }
 
@@ -428,11 +459,19 @@ export function syncTurnMics(s: RoomState): void {
 export function startDiscussion(s: RoomState, d: Deps): ApplyOk {
   s.phase = 'discussion';
   s.deadline = d.now + s.settings.discussionSeconds * 1000; // سقف احتیاطی
-  s.currentTurnIdx = 0;
-  s.turnEndsAt = d.now + s.settings.turnSeconds * 1000;
   s.targetId = null;
   s.chainReturnIdx = null;
   s.challengedIds = [];
+  s.turnNote = null;
+  // نخستین بازیکنی که سهمیهٔ کافی دارد نوبت می‌گیرد؛ اگر هیچ‌کس سهمیه نداشت مستقیم رأی‌گیری
+  let idx = -1;
+  for (let i = 0; i < s.turnOrder.length; i++) {
+    if (canTakeTurn(s, s.turnOrder[i], d)) { idx = i; break; }
+  }
+  if (idx < 0) return beginVoting(s, d, null);
+  s.currentTurnIdx = idx;
+  d.quota?.consume(s.turnOrder[idx], TURN_COST_SECONDS); // هر نوبت دقیقاً ۱۰ ثانیه از سهمیهٔ روزانه کم می‌کند
+  s.turnEndsAt = d.now + s.settings.turnSeconds * 1000;
   syncTurnMics(s);
   return { changed: true, alarmAt: Math.min(s.deadline, s.turnEndsAt) };
 }
@@ -454,20 +493,30 @@ function advanceTurn(s: RoomState, d: Deps): ApplyOk {
     s.chainReturnIdx = null;
   }
   let newIdx = oldIdx;
+  const quotaSkipped: string[] = [];
   for (let i = 0; i < s.turnOrder.length; i++) {
     newIdx = (newIdx + 1) % s.turnOrder.length;
     const pid = s.turnOrder[newIdx];
     const p = playerById(s, pid);
-    if (p && p.connected && !p.eliminated) break;
-    // بازیکن قطع‌شده/حذف‌شده → نوبتش خودکار رد می‌شود
+    if (!p || !p.connected || p.eliminated) continue; // بازیکن قطع‌شده/حذف‌شده → نوبتش خودکار رد می‌شود
+    if (d.quota && d.quota.left(pid) < TURN_COST_SECONDS) {
+      // پایان سهمیهٔ روزانه → ردّ خودکار و انتقال نوبت به بازیکن بعدی
+      quotaSkipped.push(p.name);
+      continue;
+    }
+    break;
   }
   if (newIdx <= oldIdx) {
     // دور صحبت کامل شد → فاز رأی‌گیری
     return beginVoting(s, d, null);
   }
   s.currentTurnIdx = newIdx;
+  d.quota?.consume(s.turnOrder[newIdx], TURN_COST_SECONDS); // هر نوبت دقیقاً ۱۰ ثانیه از سهمیهٔ روزانه
   s.turnEndsAt = d.now + s.settings.turnSeconds * 1000;
   s.targetId = null;
+  s.turnNote = quotaSkipped.length > 0
+    ? `${quotaSkipped.join(' و ')} به‌خاطر پایان سهمیهٔ روزانه رد شد${quotaSkipped.length > 1 ? 'ند' : ''}.`
+    : null;
   syncTurnMics(s);
   return { changed: true };
 }
@@ -512,15 +561,20 @@ function takeTurnViaChain(s: RoomState, targetId: string, d: Deps): ApplyOk | { 
   if (!t || t.id === s.turnOrder[s.currentTurnIdx] || !t.connected || t.eliminated) {
     return { changed: false, err: ERR.BAD_TARGET };
   }
+  if (d.quota && d.quota.left(targetId) < TURN_COST_SECONDS) {
+    return { changed: false, err: ERR.NO_QUOTA }; // سهمیهٔ روزانهٔ هدف تمام شده — نوبت جدید به او نمی‌رسد
+  }
   const idx = s.turnOrder.indexOf(targetId);
   if (idx < 0) return { changed: false, err: ERR.BAD_TARGET };
   if (s.chainReturnIdx == null) {
     s.chainReturnIdx = (s.currentTurnIdx + 1) % s.turnOrder.length;
   }
   s.currentTurnIdx = idx;
+  d.quota?.consume(targetId, TURN_COST_SECONDS); // هر نوبت دقیقاً ۱۰ ثانیه از سهمیهٔ روزانه
   if (!s.challengedIds.includes(targetId)) s.challengedIds.push(targetId);
   s.turnEndsAt = d.now + s.settings.turnSeconds * 1000;
   s.targetId = null;
+  s.turnNote = null;
   syncTurnMics(s);
   return { changed: true, alarmAt: nextDeadline(s) };
 }
@@ -551,6 +605,7 @@ function beginVoting(s: RoomState, d: Deps, tiedIds: string[] | null): ApplyOk {
   s.deadline = d.now + s.settings.voteSeconds * 1000;
   s.chainReturnIdx = null;
   s.challengedIds = [];
+  s.turnNote = null;
   syncTurnMics(s); // در رأی‌گیری میکروفن همه بسته است
   return { changed: true, alarmAt: s.deadline };
 }
@@ -594,6 +649,7 @@ function gotoRoundResult(s: RoomState, d: Deps, note: string | null): ApplyOk {
   s.turnEndsAt = null;
   s.chainReturnIdx = null;
   s.challengedIds = [];
+  s.turnNote = null;
   syncTurnMics(s);
   return { changed: true, alarmAt: s.deadline };
 }
@@ -661,12 +717,12 @@ export function spyGuess(s: RoomState, playerId: string, locationId: string, d: 
   const p = playerById(s, playerId);
   if (!p?.role?.isSpy) return { changed: false, err: ERR.NOT_SPY };
   if (s.spyGuessId) return { changed: false, err: ERR.BAD_GUESS };
-  if (!locationById(locationId)) return { changed: false, err: ERR.BAD_GUESS };
+  if (!wordById(locationId)) return { changed: false, err: ERR.BAD_GUESS };
   s.spyGuessId = locationId;
   if (locationId === s.location?.id) {
-    return afterCaughtSpy(s, d, true, `${p.name} متهم شد اما مکان مخفی را درست حدس زد؛ جاسوس‌ها برنده شدند!`);
+    return afterCaughtSpy(s, d, true, `${p.name} متهم شد اما کلمهٔ مخفی را درست حدس زد؛ جاسوس‌ها برنده شدند!`);
   }
-  return afterCaughtSpy(s, d, false, `${p.name} متهم و حذف شد و حدس مکان هم غلط بود؛ ${s.turnOrder.filter((id) => s.spyIds.includes(id)).length > 0 ? 'بازی ادامه دارد.' : 'شهروندها برنده شدند!'}`);
+  return afterCaughtSpy(s, d, false, `${p.name} متهم و حذف شد و کلمهٔ نوشته‌شده هم غلط بود؛ ${s.turnOrder.filter((id) => s.spyIds.includes(id)).length > 0 ? 'بازی ادامه دارد.' : 'شهروندها برنده شدند!'}`);
 }
 
 /**
@@ -873,7 +929,7 @@ export function onDeadline(s: RoomState, d: Deps): ApplyOk {
     }
     if (s.phase === 'spyGuess') {
       const spyName = s.players.find((p) => s.spyIds.includes(p.id))?.name ?? 'جاسوس';
-      return afterCaughtSpy(s, d, false, `${spyName} در فرصت حدس مکان، زمان را از دست داد؛ ${s.turnOrder.filter((id) => s.spyIds.includes(id)).length > 0 ? 'بازی ادامه دارد.' : 'شهروندها برنده شدند!'}`);
+      return afterCaughtSpy(s, d, false, `${spyName} در فرصت حدس کلمه، زمان را از دست داد؛ ${s.turnOrder.filter((id) => s.spyIds.includes(id)).length > 0 ? 'بازی ادامه دارد.' : 'شهروندها برنده شدند!'}`);
     }
     if (s.phase === 'roundResult') {
       // شروع خودکار دور بعد با کلمهٔ جدید؛ اگر ممکن نبود به لابی برمی‌گردیم
