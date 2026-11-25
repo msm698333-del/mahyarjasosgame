@@ -30,6 +30,8 @@ export const ERROR_TEXT: Record<string, string> = {
   wrong_phase: 'این عملیات در این مرحله از بازی مجاز نیست.',
   not_your_turn: 'الان نوبت شما نیست.',
   no_skips: 'سهمیهٔ رد کردن نوبت شما تمام شده است.',
+  chat_locked: 'در طول بازی چت متنی غیرفعال است؛ ارتباط فقط صوتی و در نوبت خودتان است.',
+  mic_forced_off: 'الان نوبت شما نیست؛ میکروفن فقط در نوبت شما باز می‌شود.',
   bad_target: 'این بازیکن در دسترس نیست.',
   already_voted: 'شما قبلاً رأی داده‌اید.',
   bad_vote: 'این گزینه برای رأی معتبر نیست.',
@@ -60,8 +62,18 @@ export class RoomSession {
   load(raw: unknown): void {
     if (raw && typeof raw === 'object') {
       this.s = raw as RoomState;
+      // مهاجرت لابی‌های ساخته‌شده با نسخه‌های قبلی
+      if (!Array.isArray(this.s.spyIds)) this.s.spyIds = [];
+      if (this.s.lastElimination === undefined) this.s.lastElimination = null;
+      if (this.s.roundNote === undefined) this.s.roundNote = null;
+      if (this.s.settings) {
+        if (!this.s.settings.spyWord) this.s.settings.spyWord = 'nearby';
+        if (!(this.s.settings.turnSeconds >= 15)) this.s.settings.turnSeconds = 15;
+        if (!(this.s.settings.voteSeconds >= 15)) this.s.settings.voteSeconds = Math.max(15, this.s.settings.voteSeconds ?? 30);
+      }
       for (const p of this.s.players) {
         if (!(p.reportedBy instanceof Set)) p.reportedBy = new Set(p.reportedBy ?? []);
+        if (typeof p.eliminated !== 'boolean') p.eliminated = false;
       }
     }
   }
@@ -107,6 +119,17 @@ export class RoomSession {
     return { playerId: p.id, token: p.token, reattached: false };
   }
 
+  /** نقش خصوصی هر بازیکن فقط به خودش می‌رسد (شروع هر دور) */
+  private dealRoles(): void {
+    if (!this.s || this.s.phase !== 'revealing') return;
+    for (const p of this.s.players) {
+      const role = p.connected ? roleFor(this.s, p.id) : null;
+      if (role) {
+        this.t.sendTo(p.id, { t: 'role', role });
+      }
+    }
+  }
+
   /** پیام خام از سوکت متصل به playerId */
   onMessage(playerId: string, raw: string, now: number): void {
     if (!this.s) return;
@@ -146,15 +169,11 @@ export class RoomSession {
     }
 
     if (r.emits) for (const m of r.emits) this.t.broadcast(m);
+    if (r.direct) for (const dm of r.direct) this.t.sendTo(dm.to, dm.msg);
 
     // شروع دور جدید: نقش خصوصی هر بازیکن فقط به خودش می‌رود
     if (this.s.phase === 'revealing' && this.lastPhase !== 'revealing') {
-      for (const p of this.s.players) {
-        const role = p.connected ? roleFor(this.s, p.id) : null;
-        if (role) {
-          this.t.sendTo(p.id, { t: 'role', role });
-        }
-      }
+      this.dealRoles();
     }
 
     if (this.s.phase === 'ended' && this.lastPhase !== 'ended') {
@@ -206,6 +225,11 @@ export class RoomSession {
       this.persist(this.s);
       this.sendState(now);
     }
+    // اگر تیک آلارم فاز را به «نمایش نقش» برده است (دور بعد)، نقش‌ها از نو توزیع می‌شوند
+    if (this.s.phase === 'revealing' && this.lastPhase !== 'revealing') {
+      this.dealRoles();
+    }
+    this.lastPhase = this.s.phase;
     const next = nextDeadline(this.s);
     const gcAt = now + 30_000;
     if (this.isEmpty()) return null;
