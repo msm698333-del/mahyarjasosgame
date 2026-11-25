@@ -3,9 +3,10 @@ import { describe, it, expect } from 'vitest';
 import {
   RoomState, addPlayer, apply, castVote, createRoom, endRound, markReady,
   onDeadline, publicState, removePlayer, restartRound, skipTurn, spyGuess,
-  startRound, updateSettings, currentSpeakerId, playerById, setTarget, endTurn, setVoice
+  startRound, updateSettings, currentSpeakerId, playerById, setTarget, endTurn, setVoice,
+  challenge, passTurn, spyGuessWord, normalizeWord
 } from '../shared/engine';
-import { DEFAULT_SETTINGS, ERR, ROUND_RESULT_SECONDS } from '../shared/types';
+import { DEFAULT_SETTINGS, ERR, ROUND_RESULT_SECONDS, SPY_WORD_GUESS } from '../shared/types';
 import { LOCATIONS, locationById } from '../shared/locations';
 
 let seed = 12345;
@@ -662,5 +663,166 @@ describe('امنیت داده', () => {
     }
     expect(locationById('coffee-shop')).toBeDefined();
     expect(LOCATIONS.length).toBeGreaterThanOrEqual(70);
+  });
+});
+
+/* ---------- قوانین جدید پروژه ---------- */
+
+describe('چالش و واگذاری نوبت (قانون ۱)', () => {
+  it('نوبت‌دار بازیکن دیگر را به چالش می‌کشد و پس از پایان زنجیره ترتیب اصلی حفظ می‌شود', () => {
+    const s = mkRoom(5);
+    start(s);
+    const first = currentSpeakerId(s)!;
+    const second = s.turnOrder[1];
+    const target = s.turnOrder[3];
+    const r = challenge(s, first, target, deps());
+    expect(r.err).toBeUndefined();
+    expect(r.changed).toBe(true);
+    expect(currentSpeakerId(s)).toBe(target);
+    expect(s.challengedIds).toContain(target);
+    expect(s.chainReturnIdx).toBe(1);
+    // تایمر نوبتِ به‌چالش‌کشیده‌شده از نو شروع شده است
+    expect(s.turnEndsAt).toBe(now() + s.settings.turnSeconds * 1000);
+    // پایان نوبتِ زنجیره → چرخه دقیقاً از نوبتِ بعد از چالش‌کنندهٔ اصلی ادامه می‌یابد
+    endTurn(s, target, deps());
+    expect(currentSpeakerId(s)).toBe(second);
+    expect(s.challengedIds).toEqual([]);
+    expect(s.chainReturnIdx).toBeNull();
+  });
+
+  it('به‌چالش‌کشیده‌شده می‌تواند نوبت را به بازیکن دیگری واگذار کند و زنجیره ادامه می‌یابد', () => {
+    const s = mkRoom(5);
+    start(s);
+    const first = currentSpeakerId(s)!;
+    const target = s.turnOrder[3];
+    const passer = s.turnOrder[2];
+    challenge(s, first, target, deps());
+    const r = passTurn(s, target, passer, deps());
+    expect(r.err).toBeUndefined();
+    expect(currentSpeakerId(s)).toBe(passer);
+    expect(s.challengedIds).toContain(passer);
+    // پایان زنجیرهٔ دوم هم از نقطهٔ اصلی ادامه می‌یابد
+    endTurn(s, passer, deps());
+    expect(currentSpeakerId(s)).toBe(s.turnOrder[1]);
+  });
+
+  it('واگذاری نوبت توسط بازیکن عادی (غیر به‌چالش‌کشیده) رد می‌شود', () => {
+    const s = mkRoom(5);
+    start(s);
+    const first = currentSpeakerId(s)!;
+    const r = passTurn(s, first, s.turnOrder[2], deps());
+    expect(r.err).toBe(ERR.NOT_CHALLENGED);
+    expect(currentSpeakerId(s)).toBe(first);
+  });
+
+  it('چالش خارج از نوبت رد می‌شود', () => {
+    const s = mkRoom(5);
+    start(s);
+    const nonSpeaker = s.turnOrder[2];
+    const r = challenge(s, nonSpeaker, s.turnOrder[3], deps());
+    expect(r.err).toBe(ERR.NOT_YOUR_TURN);
+  });
+
+  it('چالش به خود یا بازیکن حذف‌شده رد می‌شود', () => {
+    const s = mkRoom(5);
+    start(s);
+    const first = currentSpeakerId(s)!;
+    expect(challenge(s, first, first, deps()).err).toBe(ERR.BAD_TARGET);
+    // حذف یک بازیکن از چرخه و تلاش برای چالش او
+    const out = s.turnOrder[2];
+    s.turnOrder = s.turnOrder.filter((id) => id !== out);
+    expect(challenge(s, first, out, deps()).err).toBe(ERR.BAD_TARGET);
+  });
+});
+
+describe('حدس کلمهٔ جاسوس با نوشتن (قانون ۲)', () => {
+  function toGuessPhase(s: RoomState): void {
+    start(s);
+    onDeadline(s, { rng, now: s.deadline! + 1 });
+    expect(s.phase).toBe('voting');
+    const spy = s.players.find((p) => p.role?.isSpy)!;
+    const citizens = s.players.filter((p) => !p.role?.isSpy);
+    for (const c of citizens) castVote(s, c.id, spy.id, deps());
+    castVote(s, spy.id, null, deps());
+    expect(s.phase).toBe('spyGuess');
+  }
+
+  it('نوشتن کلمه با خط‌فاصله و املای درست — بدون هیچ خطا یا هشدار پذیرفته می‌شود', () => {
+    const s = mkRoom(4);
+    toGuessPhase(s);
+    const spy = s.players.find((p) => p.role?.isSpy)!;
+    // همان کلمه ولی با خط‌فاصله به‌جای نیم‌فاصله/فاصله — مثل «کلمه-کلمه»
+    // (اگر کلمه نیم‌فاصله/فاصله نداشته باشد، نوشتن مستقیم خودش املا درست است و باز هم پذیرفته می‌شود)
+    const hyphenated = s.location!.name.replace(/[\u200C\s]+/g, '-');
+    const r = spyGuessWord(s, spy.id, hyphenated, deps());
+    expect(r.err).toBeUndefined();
+    expect(s.phase).toBe('ended');
+    expect(s.results?.spyWon).toBe(true);
+    expect(s.results?.spyGuessId).toBe(SPY_WORD_GUESS);
+  });
+
+  it('نوشتن با ی/ک فارسی یا عربی و نیم‌فاصله هم پذیرفته می‌شود', () => {
+    const s = mkRoom(4);
+    toGuessPhase(s);
+    const spy = s.players.find((p) => p.role?.isSpy)!;
+    const name = s.location!.name;
+    // معادل‌سازی با حروف عربی و فاصلهٔ ساده
+    const arabicish = name.replace(/ی/g, 'ي').replace(/ک/g, 'ك').replace(/[\u200C]+/g, ' ');
+    const r = spyGuessWord(s, spy.id, arabicish, deps());
+    expect(r.err).toBeUndefined();
+    expect(s.results?.spyWon).toBe(true);
+  });
+
+  it('نوشتن غلط → حذف جاسوس', () => {
+    const s = mkRoom(4);
+    toGuessPhase(s);
+    const spy = s.players.find((p) => p.role?.isSpy)!;
+    const citizens = s.players.filter((p) => !p.role?.isSpy);
+    const wrong = normalizeWord(s.location!.name) === normalizeWord('بیست‌ودیست') ? 'سی‌ودو' : 'بیست‌ودیست';
+    const r = spyGuessWord(s, spy.id, wrong, deps());
+    expect(r.err).toBeUndefined();
+    expect(s.phase).toBe('ended');
+    expect(s.results?.spyWon).toBe(false);
+    expect(s.lastElimination?.wasSpy).toBe(true);
+    for (const c of citizens) expect(s.results?.scores[c.id]).toBe(1);
+  });
+
+  it('حدس دوم پس از ثبت حدس اول رد می‌شود', () => {
+    const s = mkRoom(4);
+    toGuessPhase(s);
+    const wrong = 'بیست‌ودیست';
+    spyGuessWord(s, s.players.find((p) => p.role?.isSpy)!.id, wrong, deps());
+    expect(s.phase).toBe('ended');
+    const r2 = spyGuessWord(s, s.players.find((p) => p.role?.isSpy)!.id, wrong, deps());
+    expect(r2.err).toBe(ERR.WRONG_PHASE);
+  });
+
+  it('normalizeWord: خط‌فاصله، نیم‌فاصله، فاصله و حروف عربی معادل‌اند', () => {
+    expect(normalizeWord('کوه-نورد')).toBe(normalizeWord('کوه‌نورد'));
+    expect(normalizeWord('دندان‌پزشکی')).toBe(normalizeWord('دندان-پزشکی'));
+    expect(normalizeWord('كافي شاپ')).toBe(normalizeWord('کافی‌شاپ'));
+    expect(normalizeWord('مدرسه')).toBe(normalizeWord('  مدرسه  '));
+  });
+});
+
+describe('تکرارنشدن کلمه‌ها (قانون ۳)', () => {
+  it('دورهای پشت‌سرهم هرگز کلمهٔ تکراری انتخاب نمی‌کنند', () => {
+    const s = mkRoom(4);
+    const names: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      if (i > 0) s.phase = 'roundResult'; // شبیه‌سازی انتقال بین‌دوری
+      const r = startRound(s, deps());
+      expect(r.err).toBeUndefined();
+      names.push(s.location!.name);
+    }
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('فهرست کلمه‌های استفاده‌شده در وضعیت عمومی منتشر نمی‌شود ولی در اتاق نگهداری می‌شود', () => {
+    const s = mkRoom(4);
+    startRound(s, deps());
+    expect(s.usedLocationIds).toEqual([s.location!.id]);
+    const ps = publicState(s, now());
+    expect(JSON.stringify(ps)).not.toContain('usedLocationIds');
   });
 });
