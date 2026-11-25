@@ -45,6 +45,7 @@ export interface VoiceDiag {
 interface VoiceStatus {
   joined: boolean;
   micOn: boolean;
+  micLocked: boolean; // میکروفن با کنترل نوبتی قفل شده (خارج از نوبت)
   deafened: boolean;
   speaking: boolean;
   connecting: boolean;
@@ -76,6 +77,7 @@ class VoiceManager {
   joined = false;
   connecting = false;
   micOn = false;
+  micLocked = false;   // قفل نوبتی: خارج از نوبت، کلاینت هم اجازهٔ روشن‌کردن ندارد
   deafened = false;
   speaking = false;
   error: string | null = null;
@@ -83,7 +85,11 @@ class VoiceManager {
   micDeviceId: string | null = null;
   speakerDeviceId: string | null = null;
   lastAudioError: string | null = null;
+  /** هشدار میوت خارج از نوبت — توسط store به toast وصل می‌شود */
+  warnCb: ((message: string) => void) | null = null;
 
+  private userMicPref = true; // ترجیح دستی کاربر در فازهای آزاد
+  private lastPolicyWarnAt = 0;
   private localStream: MediaStream | null = null;
   private peers = new Map<string, PeerInfo>();
   private selfId = '';
@@ -112,6 +118,7 @@ class VoiceManager {
     return {
       joined: this.joined,
       micOn: this.micOn,
+      micLocked: this.micLocked,
       deafened: this.deafened,
       speaking: this.speaking,
       connecting: this.connecting,
@@ -149,6 +156,8 @@ class VoiceManager {
       this.selfId = selfId;
       this.joined = true;
       this.micOn = true;
+      this.micLocked = false;
+      this.userMicPref = true;
       this.setupLocalAnalyser();
       // تلاش مجدد پخش صدا با هر کلیک کاربر (خط‌مشی autoplay مرورگر)
       if (!this.gestureHandler && typeof document !== 'undefined') {
@@ -202,6 +211,8 @@ class VoiceManager {
     this.localAnalyser = null;
     this.joined = false;
     this.micOn = false;
+    this.micLocked = false;
+    this.userMicPref = true;
     this.speaking = false;
     this.level = 0;
     this.lastAudioError = null;
@@ -210,12 +221,75 @@ class VoiceManager {
     this.emit();
   }
 
+  /** خاموش/روشن کردن میکروفن — در فازهای کنترل‌شده و خارج از نوبت مسدود است */
   toggleMic(): boolean {
-    this.micOn = !this.micOn;
-    this.localStream?.getAudioTracks().forEach((t) => { t.enabled = this.micOn; });
+    if (this.micLocked) {
+      const now = Date.now();
+      if (now - this.lastPolicyWarnAt > 2500) {
+        this.lastPolicyWarnAt = now;
+        this.warnCb?.('الان نوبت شما نیست؛ میکروفن فقط در نوبت شما باز می‌شود.');
+      }
+      this.emit();
+      return this.micOn;
+    }
+    const next = !this.micOn;
+    this.userMicPref = next;
+    this.setMicLocal(next);
+    return next;
+  }
+
+  /** اعمال محلی وضعیت میکروفن + اطلاع به سرور */
+  private setMicLocal(on: boolean): void {
+    this.micOn = on;
+    this.localStream?.getAudioTracks().forEach((t) => { t.enabled = on; });
     this.emit();
-    this.onVoiceUpdate?.(this.micOn);
-    return this.micOn;
+    this.onVoiceUpdate?.(on);
+  }
+
+  /** میوت اضطراری با فرمان سرور (خطای mic_forced_off) */
+  forceMicOff(): void {
+    this.userMicPref = false;
+    if (this.micOn) this.setMicLocal(false);
+    else this.emit();
+  }
+
+  /**
+   * سیاست نوبتی میکروفن (مثل مافیا) — با هر state سرور صدا زده می‌شود:
+   * — فاز بحث: فقط میکروفن نوبت‌دار باز می‌ماند؛ بقیه خودکار بسته می‌شوند.
+   * — فاز رأی‌گیری/حدس: میکروفن همه بسته است.
+   * — نوبت شما که برسد، میکروفن شما خودکار باز می‌شود.
+   * — فازهای آزاد (انتظار/نقش/نتیجه): ترجیح دستی کاربر اعمال می‌شود.
+   */
+  applyVoicePolicy(state: PublicState): void {
+    if (!this.joined) return;
+    const phase = state.phase;
+    const controlled = phase === 'discussion' || phase === 'voting' || phase === 'spyGuess';
+    if (!controlled) {
+      this.micLocked = false;
+      if (this.micOn !== this.userMicPref) this.setMicLocal(this.userMicPref);
+      return;
+    }
+    const me = state.players.find((p) => p.id === this.selfId);
+    const speakerId = state.turnOrder[state.currentTurnIdx];
+    const allowed = phase === 'discussion'
+      && speakerId === this.selfId
+      && !!me && me.connected && !me.forceMuted && me.hasVoice && me.micOn;
+    this.micLocked = !allowed;
+    if (allowed && !this.micOn) {
+      // نوبت شماست — میکروفن خودکار باز می‌شود
+      this.setMicLocal(true);
+      return;
+    }
+    if (!allowed && this.micOn) {
+      this.setMicLocal(false);
+      const now = Date.now();
+      if (now - this.lastPolicyWarnAt > 3000) {
+        this.lastPolicyWarnAt = now;
+        this.warnCb?.(phase === 'discussion'
+          ? 'صحبت خارج از نوبت مجاز نیست؛ میکروفن شما خاموش شد.'
+          : 'در این فاز میکروفن همه بسته است.');
+      }
+    }
   }
 
   toggleDeafen(): boolean {
