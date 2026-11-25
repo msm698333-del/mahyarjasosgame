@@ -1,21 +1,19 @@
 import { useState } from 'react';
 import { PublicState } from '../../shared/types';
 import { socket, useStore } from '../net/store';
-import { Btn, Modal, Chip, faNum } from '../components/ui';
+import { Btn, faNum } from '../components/ui';
 import { PlayerCard } from '../components/PlayerCard';
-import { StickerButton, StickerOverlay, StickerGrid } from '../components/StickerPanel';
-import { ChatPanel } from '../components/ChatPanel';
+import { StickerOverlay } from '../components/StickerPanel';
 import { VoiceBar } from '../components/VoiceBar';
 import { TimerBar, TurnBanner } from '../components/TimerBar';
-import { IconSkip, IconSearch } from '../components/Icons';
+import { IconSkip, IconMicOff, IconSearch } from '../components/Icons';
 import { LOCATIONS, CATEGORIES, categoryName } from '../../shared/locations';
 
-/** محیط اصلی بازی: نوبت‌ها، پرسش از هدف، Skip Turn، استیکر، صوت */
+/** محیط اصلی بازی: نوبت‌های ۱۵ ثانیه‌ای صحبت صوتی (مثل مافیا) — بدون چت متنی */
 export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?: boolean }) {
   const me = useStore((s) => s.you);
   const role = useStore((s) => s.role);
   const stickers = useStore((s) => s.stickers);
-  const [pickTarget, setPickTarget] = useState(false);
   if (!me) return null;
   const mePlayer = st.players.find((p) => p.id === me.id)!;
   const isSpeaker = st.turnOrder[st.currentTurnIdx] === me.id;
@@ -35,7 +33,7 @@ export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?:
   return (
     <div className="page game">
       <StickerOverlay items={stickers} />
-      <TimerBar st={st} label="زمان بحث" />
+      <TimerBar st={st} label="نوبت صحبت" mode="turn" />
       <TurnBanner st={st} meId={me.id} />
 
       <div className="game-grid">
@@ -45,54 +43,38 @@ export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?:
           </div>
 
           <div className="game-actions">
-            {isSpeaker && !st.targetId && (
-              <Btn size="lg" onClick={() => setPickTarget(true)}>
-                <IconSearch size={18} /> انتخاب بازیکن برای پرسش
-              </Btn>
-            )}
-            {isSpeaker && st.targetId && (
-              <Btn size="lg" onClick={() => setPickTarget(true)}>
-                تغییر هدف پرسش
-              </Btn>
-            )}
             {isSpeaker && (
               <>
+                <span className="turn-hint">سرنخ بدهید — کلمه را مستقیم نگویید</span>
                 <Btn variant="warn" size="lg" disabled={mePlayer.skipLeft <= 0} onClick={() => socket.send({ t: 'skipTurn' })}
                   title={mePlayer.skipLeft <= 0 ? 'سهمیه تمام شده' : 'نوبت را رد کن و به نفر بعدی بده'}>
                   <IconSkip size={18} /> رد کردن نوبت ({faNum(mePlayer.skipLeft)})
                 </Btn>
-                <Btn variant="ghost" size="lg" onClick={() => socket.send({ t: 'endTurn' })}>پایان پرسش من</Btn>
+                <Btn variant="success" size="lg" onClick={() => socket.send({ t: 'endTurn' })}>پایان نوبت</Btn>
               </>
             )}
             {!isSpeaker && (
-              <span className="muted">صبر کنید تا سؤال پرسیده و جواب داده شود…</span>
+              <span className="muted mic-locked-note">
+                <IconMicOff size={16} /> نوبت {speaker?.name ?? '—'} است؛ میکروفن شما تا نوبتتان خاموش است
+              </span>
             )}
-            <StickerButton />
           </div>
           <VoiceBar />
         </section>
 
         <aside className="game-side">
           <div className="card side-card">
-            <div className="side-head"><span>گفت‌وگو</span><StickerButton /></div>
-            <ChatPanel compact />
+            <div className="side-head"><span>یادآوری قوانین</span></div>
+            <ul className="mini-rules">
+              <li>هر بازیکن در هر دور یک نوبت ۱۵ ثانیه‌ای صحبت دارد.</li>
+              <li>میکروفن فقط در نوبت شما باز است و با پایان زمان خودکار بسته می‌شود.</li>
+              <li>کلمه را مستقیم نگویید؛ فقط سرنخ بدهید.</li>
+              <li>چت متنی در طول بازی غیرفعال است؛ ارتباط فقط صوتی در نوبت خود.</li>
+              <li>بعد از آخرین نوبت، رأی‌گیری برای حذف جاسوس شروع می‌شود.</li>
+            </ul>
           </div>
         </aside>
       </div>
-
-      <Modal open={pickTarget} onClose={() => setPickTarget(false)} title="از چه کسی می‌پرسید؟">
-        <div className="target-list">
-          {st.players.filter((p) => p.id !== me.id && p.connected).map((p) => (
-            <button key={p.id} className="target-item" onClick={() => {
-              socket.send({ t: 'target', targetId: p.id });
-              setPickTarget(false);
-            }}>
-              {p.name}
-              {st.targetId === p.id && <Chip tone="gold">هدف فعلی</Chip>}
-            </button>
-          ))}
-        </div>
-      </Modal>
     </div>
   );
 }

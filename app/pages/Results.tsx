@@ -2,10 +2,71 @@ import { socket, useStore } from '../net/store';
 import { Btn, Chip, faNum } from '../components/ui';
 import { Avatar } from '../data/avatars';
 import { categoryName } from '../../shared/locations';
-import { StickerButton } from '../components/StickerPanel';
+import { StickerButton, StickerOverlay } from '../components/StickerPanel';
 import { VoiceBar } from '../components/VoiceBar';
+import { TimerBar } from '../components/TimerBar';
+import { PublicState } from '../../shared/types';
 
-/** صفحه اعلام نتیجه + امتیازها + شروع دور جدید */
+/** صفحهٔ بین‌دوری: افشای نقش حذف‌شده + شمارش معکوس کوتاه تا دور بعد */
+export function RoundTransition({ st }: { st: PublicState }) {
+  const serverNow = useStore((s) => s.serverNow());
+  const stickers = useStore((s) => s.stickers);
+  const el = st.elimination;
+  const left = st.deadline ? Math.max(0, st.deadline - serverNow) : 0;
+  const alive = st.players.filter((p) => p.connected && !p.eliminated);
+  const eliminatedList = st.players.filter((p) => p.eliminated);
+
+  return (
+    <div className="page results round-transition">
+      <StickerOverlay items={stickers} />
+      <TimerBar st={st} label="تا شروع دور بعد" />
+      <div className={`result-banner ${el?.wasSpy ? 'win' : 'neutral'}`}>
+        <h2>{el ? `${el.name} حذف شد` : 'این دور بدون حذف تمام شد'}</h2>
+        <div className="result-line">
+          {el
+            ? (el.wasSpy ? 'نقش او افشا شد: جاسوس بود! باقی بازی ادامه دارد…' : 'نقش او افشا شد: شهروند بود — جاسوس هنوز آزاد است!')
+            : (st.roundNote ?? 'به دور بعد می‌رویم…')}
+        </div>
+      </div>
+
+      <div className="result-grid">
+        <div className="card result-card">
+          <h4>بازیکنان باقی‌مانده ({faNum(alive.length)})</h4>
+          <div className="score-list">
+            {alive.map((p) => (
+              <div key={p.id} className="score-row">
+                <Avatar id={p.avatar} size={30} />
+                <span className="sr-name">{p.name}</span>
+                <Chip tone="teal">در بازی</Chip>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="card result-card">
+          <h4>حذف‌شده‌ها ({faNum(eliminatedList.length)})</h4>
+          <div className="score-list">
+            {eliminatedList.length === 0 && <span className="muted small">هنوز کسی حذف نشده است.</span>}
+            {eliminatedList.map((p) => (
+              <div key={p.id} className="score-row">
+                <Avatar id={p.avatar} size={30} />
+                <span className="sr-name">{p.name}</span>
+                <Chip tone="danger">حذف‌شده</Chip>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="result-actions">
+        <span className="muted">دور بعد با کلمهٔ جدید تا {faNum(Math.ceil(left / 1000))} ثانیه دیگر خودکار شروع می‌شود…</span>
+        <StickerButton />
+      </div>
+      <VoiceBar />
+    </div>
+  );
+}
+
+/** صفحه اعلام نتیجهٔ نهایی + امتیازها + بازی جدید */
 export function Results() {
   const st = useStore((s) => s.state)!;
   const role = useStore((s) => s.role);
@@ -77,11 +138,11 @@ export function Results() {
       <div className="result-actions">
         {me.isHost ? (
           <>
-            <Btn size="lg" variant="success" onClick={() => socket.send({ t: 'restart' })}>دور جدید</Btn>
+            <Btn size="lg" variant="success" onClick={() => socket.send({ t: 'restart' })}>بازی جدید (همه از نو)</Btn>
             <Btn size="lg" variant="ghost" onClick={() => socket.send({ t: 'leave' })}>بازگشت به خانه</Btn>
           </>
         ) : (
-          <span className="muted">میزبان دور بعد را شروع می‌کند…</span>
+          <span className="muted">میزبان بازی جدید را شروع می‌کند…</span>
         )}
         <StickerButton />
       </div>

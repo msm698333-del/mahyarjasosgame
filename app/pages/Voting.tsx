@@ -3,10 +3,10 @@ import { socket, useStore } from '../net/store';
 import { Btn, Chip, faNum } from '../components/ui';
 import { Avatar } from '../data/avatars';
 import { StickerOverlay } from '../components/StickerPanel';
-import { ChatPanel } from '../components/ChatPanel';
 import { TimerBar } from '../components/TimerBar';
+import { IconMicOff } from '../components/Icons';
 
-/** صفحه رأی‌گیری محرمانه */
+/** صفحه رأی‌گیری محرمانه — بدون چت و بدون میکروفن */
 export function Voting() {
   const st = useStore((s) => s.state)!;
   const me = useStore((s) => s.you)!;
@@ -16,15 +16,28 @@ export function Voting() {
   if (!st || !me) return null;
 
   const tied = st.tiedIds;
-  const candidates = st.players.filter((p) => (tied ? tied.includes(p.id) : p.id !== me.id) && p.connected);
-  const canAbstain = true;
+  const candidates = st.players.filter((p) => (tied ? tied.includes(p.id) : p.id !== me.id) && p.connected && !p.eliminated);
+  const mePlayer = st.players.find((p) => p.id === me.id);
   const voted = st.votesSubmitted;
-  const connectedCount = st.players.filter((p) => p.connected).length;
+  const connectedCount = st.players.filter((p) => p.connected && !p.eliminated).length;
 
   const submit = (target: string | null) => {
     socket.send({ t: 'vote', targetId: target });
     setConfirm(false);
   };
+
+  if (mePlayer?.eliminated) {
+    return (
+      <div className="page voting">
+        <StickerOverlay items={stickers} />
+        <TimerBar st={st} label={tied ? `رأی‌گیری مجدد (دور ${faNum(st.voteRound)})` : 'رأی‌گیری محرمانه'} />
+        <div className="card waiting-panel">
+          <div className="pulse-dot" />
+          <p>شما در این بازی حذف شده‌اید؛ به‌عنوان تماشاچی نتایج رأی‌گیری را دنبال کنید.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page voting">
@@ -47,12 +60,11 @@ export function Voting() {
         <Btn size="lg" variant="danger" disabled={!sel} onClick={() => setConfirm(true)}>
           رأی محرمانه به: {sel ? st.players.find((p) => p.id === sel)?.name : '—'}
         </Btn>
-        {canAbstain && <Btn variant="ghost" onClick={() => submit(null)}>رأی نمی‌دهم (ابستین)</Btn>}
+        <Btn variant="ghost" onClick={() => submit(null)}>رأی نمی‌دهم (ابستین)</Btn>
       </div>
-      <p className="muted small">رأی شما تا پایان شمارش مخفی می‌ماند و فقط شمارش کلی نمایش داده می‌شود.</p>
-      <div className="card side-card">
-        <ChatPanel compact />
-      </div>
+      <p className="muted small mic-off-note">
+        <IconMicOff size={14} /> در فاز رأی‌گیری میکروفن همه بسته است و چت متنی غیرفعال است — بیشترین رأی حذف می‌شود و نقشش افشا می‌شود.
+      </p>
 
       {confirm && sel && (
         <div className="modal-backdrop" onClick={() => setConfirm(false)}>

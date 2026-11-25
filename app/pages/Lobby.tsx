@@ -5,7 +5,7 @@ import { PlayerCard } from '../components/PlayerCard';
 import { StickerButton, StickerOverlay } from '../components/StickerPanel';
 import { ChatPanel } from '../components/ChatPanel';
 import { VoiceBar } from '../components/VoiceBar';
-import { IconPlay, IconShield } from '../components/Icons';
+import { IconShield } from '../components/Icons';
 import { CATEGORIES } from '../../shared/locations';
 import { useState } from 'react';
 
@@ -14,7 +14,11 @@ export function Lobby({ st }: { st: PublicState }) {
   const [showSettings, setShowSettings] = useState(false);
   const mePlayer = st.players.find((p) => p.id === me?.id);
   const isHost = me?.isHost;
-  const connected = st.players.filter((p) => p.connected).length;
+  const connected = st.players.filter((p) => p.connected);
+  const connectedCount = connected.length;
+  const readyCount = connected.filter((p) => p.ready).length;
+  // شروع خودکار: همهٔ متصل‌ها آماده باشند (حداقل ۳ نفر) — بدون تأیید میزبان و بدون شمارش معکوس
+  const allReady = connectedCount >= 3 && readyCount === connectedCount;
 
   if (!me) return null;
 
@@ -26,7 +30,7 @@ export function Lobby({ st }: { st: PublicState }) {
           <div className="lobby-head">
             <h2>اتاق انتظار</h2>
             <Chip tone="gold">کد لابی: {st.code}</Chip>
-            <Chip tone="muted">{faNum(connected)} بازیکن متصل</Chip>
+            <Chip tone="muted">{faNum(connectedCount)} بازیکن متصل</Chip>
           </div>
           <div className="players-grid">
             {st.players.map((p) => <PlayerCard key={p.id} p={p} st={st} me={mePlayer!} />)}
@@ -36,25 +40,24 @@ export function Lobby({ st }: { st: PublicState }) {
               </div>
             ))}
           </div>
+          <div className="ready-status">
+            <Chip tone="teal">آماده: {faNum(readyCount)}/{faNum(connectedCount)}</Chip>
+            {!allReady && <span className="waiting-msg muted">در انتظار آمادگی بازیکنان…</span>}
+            {allReady && <span className="waiting-msg go">همه آماده‌اند! بازی خودکار شروع می‌شود…</span>}
+          </div>
           <div className="lobby-actions">
             {isHost && (
               <Btn size="lg" onClick={() => setShowSettings(true)}>تنظیمات بازی</Btn>
             )}
-            {!isHost && (
-              <span className="muted">میزبان بازی را شروع می‌کند؛ تا آن موقع صدا و استیکر در دسترس است.</span>
-            )}
-            {isHost && (
-              <Btn
-                size="lg"
-                variant="success"
-                disabled={connected < 3}
-                onClick={() => socket.send({ t: 'start' })}
-                title={connected < 3 ? 'حداقل ۳ بازیکن لازم است' : 'شروع بازی'}
-              >
-                <IconPlay size={18} /> شروع بازی
-              </Btn>
-            )}
+            <Btn
+              size="lg"
+              variant={mePlayer?.ready ? 'ghost' : 'success'}
+              onClick={() => socket.send({ t: 'ready', value: !mePlayer?.ready })}
+            >
+              {mePlayer?.ready ? 'لغو آمادگی' : 'آماده شدم'}
+            </Btn>
           </div>
+          {!isHost && <span className="muted small">وقتی همه آماده شوند، بازی بدون نیاز به میزبان خودکار شروع می‌شود.</span>}
           <VoiceBar />
         </section>
         <aside className="lobby-side">
@@ -78,9 +81,10 @@ function QuickRules() {
     <div className="card side-card rules-card">
       <h4><IconShield size={16} /> یادآوری سریع</h4>
       <ul>
-        <li>جاسوس مکان را نمی‌بیند؛ فقط دسته را.</li>
-        <li>پرسش‌ها باید دربارهٔ مکان‌ها باشد، نه نام مستقیم.</li>
-        <li>رد کردن نوبت سهمیه دارد و در نوبت خودت فعال است.</li>
+        <li>همهٔ شهروندها کلمهٔ یکسانی دارند؛ فقط جاسوس کلمه‌اش متفاوت (یا هیچ) است.</li>
+        <li>در نوبت ۱۵ ثانیه‌ای خود، سرنخ بدهید — بدون گفتن مستقیم کلمه.</li>
+        <li>میکروفن فقط در نوبت شما باز است؛ بقیه خودکار بی‌صدا می‌شوند.</li>
+        <li>بعد از یک دور کامل صحبت، رأی‌گیری شروع می‌شود؛ بیشترترین رأی حذف می‌شود.</li>
       </ul>
     </div>
   );
@@ -92,6 +96,8 @@ export function SettingsSheet({ st, onClose }: { st: PublicState; onClose: () =>
   const [spyCount, setSpyCount] = useState(st.settings.spyCount);
   const [discussion, setDiscussion] = useState(st.settings.discussionSeconds);
   const [turn, setTurn] = useState(st.settings.turnSeconds);
+  const [vote, setVote] = useState(st.settings.voteSeconds);
+  const [spyWord, setSpyWord] = useState(st.settings.spyWord);
   const [skip, setSkip] = useState(st.settings.skipPerPlayer);
   const [cats, setCats] = useState<string[]>(st.settings.categories);
 
@@ -120,15 +126,28 @@ export function SettingsSheet({ st, onClose }: { st: PublicState; onClose: () =>
               onChange={(v) => { setSpyCount(v); setPatch({ spyCount: v }); }} />
           </div>
           <div className="set-row">
-            <span>مدت بحث</span>
+            <span>سقف احتیاطی کل بحث (پشتیبان)</span>
             <select disabled={!isHost} value={discussion} onChange={(e) => { const v = Number(e.target.value); setDiscussion(v); setPatch({ discussionSeconds: v }); }}>
               {[240, 360, 480, 600, 900].map((v) => <option key={v} value={v}>{faNum(v / 60)} دقیقه</option>)}
             </select>
           </div>
           <div className="set-row">
-            <span>سقف هر نوبت</span>
+            <span>مدت هر نوبت صحبت</span>
             <select disabled={!isHost} value={turn} onChange={(e) => { const v = Number(e.target.value); setTurn(v); setPatch({ turnSeconds: v }); }}>
-              {[30, 45, 60, 90, 120].map((v) => <option key={v} value={v}>{faNum(v)} ثانیه</option>)}
+              {[15, 20, 30, 45, 60].map((v) => <option key={v} value={v}>{faNum(v)} ثانیه</option>)}
+            </select>
+          </div>
+          <div className="set-row">
+            <span>مدت رأی‌گیری</span>
+            <select disabled={!isHost} value={vote} onChange={(e) => { const v = Number(e.target.value); setVote(v); setPatch({ voteSeconds: v }); }}>
+              {[15, 30, 45, 60].map((v) => <option key={v} value={v}>{faNum(v)} ثانیه</option>)}
+            </select>
+          </div>
+          <div className="set-row">
+            <span>کلمهٔ جاسوس</span>
+            <select disabled={!isHost} value={spyWord} onChange={(e) => { setSpyWord(e.target.value as 'nearby' | 'none'); setPatch({ spyWord: e.target.value }); }}>
+              <option value="nearby">کلمه‌ای نزدیک کلمهٔ شهروندها</option>
+              <option value="none">بدون کلمه (فقط دستهٔ مکان)</option>
             </select>
           </div>
           <div className="set-row">
