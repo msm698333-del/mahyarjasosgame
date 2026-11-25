@@ -6,7 +6,7 @@ import { StickerButton, StickerOverlay } from '../components/StickerPanel';
 import { ChatPanel } from '../components/ChatPanel';
 import { VoiceBar } from '../components/VoiceBar';
 import { IconShield } from '../components/Icons';
-import { CATEGORIES } from '../../shared/locations';
+import { WORD_CATEGORIES } from '../../shared/wordBank';
 import { useState } from 'react';
 
 export function Lobby({ st }: { st: PublicState }) {
@@ -81,8 +81,9 @@ function QuickRules() {
     <div className="card side-card rules-card">
       <h4><IconShield size={16} /> یادآوری سریع</h4>
       <ul>
-        <li>همهٔ شهروندها کلمهٔ یکسانی دارند؛ فقط جاسوس کلمه‌اش متفاوت (یا هیچ) است.</li>
-        <li>در نوبت ۱۵ ثانیه‌ای خود، سرنخ بدهید — بدون گفتن مستقیم کلمه.</li>
+        <li>همهٔ شهروندها کلمهٔ یکسانی دارند؛ فقط جاسوس کلمهٔ نزدیک (یا هیچ) دارد.</li>
+        <li>هر نوبت دقیقاً ۱۰ ثانیه است و تایمر سمت سرور کنترل می‌شود؛ پس از صفر، نوبت خودکار جلو می‌رود.</li>
+        <li>سهمیهٔ روزانهٔ هر بازیکن ۶۰ ثانیه است (هر نوبت ۱۰ ثانیه) — بازنشانی در ۰۰:۰۰ تهران.</li>
         <li>میکروفن فقط در نوبت شما باز است؛ بقیه خودکار بی‌صدا می‌شوند.</li>
         <li>بعد از یک دور کامل صحبت، رأی‌گیری شروع می‌شود؛ بیشترترین رأی حذف می‌شود.</li>
       </ul>
@@ -95,7 +96,7 @@ export function SettingsSheet({ st, onClose }: { st: PublicState; onClose: () =>
   const [maxPlayers, setMaxPlayers] = useState(st.settings.maxPlayers);
   const [spyCount, setSpyCount] = useState(st.settings.spyCount);
   const [discussion, setDiscussion] = useState(st.settings.discussionSeconds);
-  const [turn, setTurn] = useState(st.settings.turnSeconds);
+  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>(st.settings.difficulty);
   const [vote, setVote] = useState(st.settings.voteSeconds);
   const [spyWord, setSpyWord] = useState(st.settings.spyWord);
   const [skip, setSkip] = useState(st.settings.skipPerPlayer);
@@ -132,10 +133,16 @@ export function SettingsSheet({ st, onClose }: { st: PublicState; onClose: () =>
             </select>
           </div>
           <div className="set-row">
-            <span>مدت هر نوبت صحبت</span>
-            <select disabled={!isHost} value={turn} onChange={(e) => { const v = Number(e.target.value); setTurn(v); setPatch({ turnSeconds: v }); }}>
-              {[15, 20, 30, 45, 60].map((v) => <option key={v} value={v}>{faNum(v)} ثانیه</option>)}
+            <span>سطح سختی کلمهٔ جاسوس</span>
+            <select disabled={!isHost} value={difficulty} onChange={(e) => { setDifficulty(e.target.value as 'easy' | 'medium' | 'hard'); setPatch({ difficulty: e.target.value }); }}>
+              <option value="easy">آسان — کلمهٔ جاسوس کم‌شباهت است</option>
+              <option value="medium">متوسط — کلمهٔ مرتبط و متمایز</option>
+              <option value="hard">سخت — کلمهٔ بسیار نزدیک به کلمهٔ شهروندها</option>
             </select>
+          </div>
+          <div className="set-row">
+            <span>مدت هر نوبت صحبت</span>
+            <span className="set-fixed">۱۰ ثانیه (قفل سراسری — تغییر نمی‌کند)</span>
           </div>
           <div className="set-row">
             <span>مدت رأی‌گیری</span>
@@ -146,8 +153,8 @@ export function SettingsSheet({ st, onClose }: { st: PublicState; onClose: () =>
           <div className="set-row">
             <span>کلمهٔ جاسوس</span>
             <select disabled={!isHost} value={spyWord} onChange={(e) => { setSpyWord(e.target.value as 'nearby' | 'none'); setPatch({ spyWord: e.target.value }); }}>
-              <option value="nearby">کلمه‌ای نزدیک کلمهٔ شهروندها</option>
-              <option value="none">بدون کلمه (فقط دستهٔ مکان)</option>
+              <option value="nearby">کلمهٔ نزدیک کلمهٔ شهروندها (بر اساس سختی)</option>
+              <option value="none">بدون کلمه — جاسوس فقط دسته را می‌داند</option>
             </select>
           </div>
           <div className="set-row">
@@ -156,9 +163,9 @@ export function SettingsSheet({ st, onClose }: { st: PublicState; onClose: () =>
               onChange={(v) => { setSkip(v); setPatch({ skipPerPlayer: v }); }} />
           </div>
           <div className="set-cats">
-            <span className="set-cats-title">دسته‌های فعال مکان‌ها (خالی = همه)</span>
+            <span className="set-cats-title">دسته‌های فعال بانک کلمات (خالی = همهٔ ۱۷ دسته)</span>
             <div className="cat-grid">
-              {CATEGORIES.map((c) => (
+              {WORD_CATEGORIES.map((c) => (
                 <button
                   key={c.id}
                   disabled={!isHost}
