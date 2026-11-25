@@ -37,6 +37,25 @@ interface ClientStore {
 
 const LS_IDENTITY = 'spy:identity';
 const LS_SESSIONS = 'spy:sessions';
+const LS_DEVICE = 'spy:device';
+
+/**
+ * شناسهٔ پایدار دستگاه — مبنای سهمیهٔ روزانهٔ سراسری.
+ * مصرف‌شده پس از خروج و ورود مجدد بازیابی نمی‌شود چون کلید در localStorage می‌ماند
+ * و رکورد مصرف سمت سرور (QuotaDO) ذخیره می‌شود.
+ */
+export function getDeviceId(): string {
+  try {
+    let v = localStorage.getItem(LS_DEVICE);
+    if (!v || !/^[a-f0-9-]{16,64}$/.test(v)) {
+      v = (crypto.randomUUID?.() ?? `d-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`);
+      localStorage.setItem(LS_DEVICE, v);
+    }
+    return v;
+  } catch {
+    return 'd-unknown-device'; // بدون localStorage — سهمیه فقط در همین لابی اعمال می‌شود
+  }
+}
 
 function loadIdentity(): Identity | null {
   try {
@@ -101,7 +120,7 @@ export const useStore = create<ClientStore>((set, get) => ({
     }
     set({ connStatus: 'connecting', connError: null, chat: [], stickers: [], you: null, state: null, role: null });
     const saved = loadSessionToken(code);
-    return socket.connect(code, identity, saved?.playerId, saved?.token).then(() => {
+    return socket.connect(code, identity, saved?.playerId, saved?.token, getDeviceId()).then(() => {
       set({ connStatus: 'open' });
     }).catch((e) => {
       set({ connStatus: 'error', connError: String((e as Error)?.message ?? e) });
@@ -128,7 +147,7 @@ export const useStore = create<ClientStore>((set, get) => ({
       identity: { name, avatar }
     });
     try {
-      await socket.connect(data.code, { name, avatar }, data.playerId, data.token);
+      await socket.connect(data.code, { name, avatar }, data.playerId, data.token, getDeviceId());
       set({ connStatus: 'open' });
     } catch (e) {
       set({ connStatus: 'error', connError: String((e as Error)?.message ?? e) });
