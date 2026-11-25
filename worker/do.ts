@@ -11,6 +11,7 @@ import { RoomSession, welcomeFor } from './room';
 
 export interface Env {
   GAME_ROOM: DurableObjectNamespace;
+  PLAYER_QUOTA: DurableObjectNamespace;
   ASSETS: Fetcher;
   DB?: D1Database;
   TURN_URLS?: string;
@@ -43,7 +44,8 @@ export class GameRoomDO extends DurableObject<Env> {
       this.transport(),
       (s) => { this.lastState = s; },
       cryptoRng,
-      (s) => { this.matchToRecord = s; }
+      (s) => { this.matchToRecord = s; },
+      true // سهمیهٔ روزانه فعال است — اعتبارسنجی کامل سمت سرور
     );
     session.alarmCb = (at) => { this.alarmRequest = at; };
     if (raw) session.load(raw);
@@ -171,10 +173,11 @@ export class GameRoomDO extends DurableObject<Env> {
     const att = safeAttachment(ws);
 
     if (parsed.t === 'hello') {
-      const body = parsed as { t: 'hello'; name?: string; avatar?: number; playerId?: string; token?: string };
+      const body = parsed as { t: 'hello'; name?: string; avatar?: number; playerId?: string; token?: string; deviceId?: string };
       const r = session.hello(
         body.playerId ?? null, body.token ?? null,
-        String(body.name ?? ''), Number(body.avatar ?? 0), Date.now()
+        String(body.name ?? ''), Number(body.avatar ?? 0), Date.now(),
+        typeof body.deviceId === 'string' && body.deviceId ? body.deviceId.slice(0, 64) : undefined
       );
       if ('err' in r) {
         ws.send(JSON.stringify({ t: 'error', code: r.err, message: 'ورود ناموفق بود.' }));
@@ -182,14 +185,16 @@ export class GameRoomDO extends DurableObject<Env> {
         return;
       }
       ws.serializeAttachment({ pid: r.playerId });
+      // سهمیهٔ روزانهٔ بازیکنان از QuotaDO تازه می‌شود — قبل از ساخت welcome/state
+      await this.refreshQuota(session);
       const w = welcomeFor(session.s!, r.playerId, Date.now());
       if (w) {
         ws.send(JSON.stringify({
           t: 'welcome', code: this.ctx.id.name ?? session.s!.code, you: w.you,
           state: w.state, role: w.role
         }));
-        // وضعیت به‌روز برای همه (ورود جدید یا اتصال مجدد)
-        this.broadcast({ t: 'state', state: publicState(session.s!, Date.now()) });
+        // وضعیت به‌روز برای همه — شخصی‌سازی‌شده (سهمیهٔ هر بازیکن فقط برای خودش)
+        session.broadcastStates(Date.now());
       }
       await this.commit();
       return;
@@ -197,6 +202,8 @@ export class GameRoomDO extends DurableObject<Env> {
 
     if (!att?.pid) return;
     session.onMessage(att.pid, message, Date.now());
+    // مصرف سهمیهٔ نوبت‌های شروع‌شده در QuotaDO ثبت و کش همگام می‌شود
+    await this.flushConsumes(session);
     await this.commit();
   }
 
@@ -222,8 +229,12 @@ export class GameRoomDO extends DurableObject<Env> {
       await this.ctx.storage.deleteAll();
       return;
     }
+    // کش سهمیهٔ روزانه قبل از تیک تازه می‌شود تا ردّ خودکار با دادهٔ درست انجام شود
+    // (بازنشانی ۰۰:۰۰ تهران هم همین‌جا خودکار اعمال می‌شود)
+    await this.refreshQuota(session);
     session.tick(Date.now());
     const empty = session.isEmpty();
+    await this.flushConsumes(session);
     await this.commit();
     if (empty) {
       await this.ctx.storage.deleteAll();
@@ -233,6 +244,45 @@ export class GameRoomDO extends DurableObject<Env> {
     const current = await this.ctx.storage.getAlarm();
     if (current == null) {
       await this.scheduleAlarm(Date.now() + 30_000);
+    }
+  }
+
+  /* ---------- سهمیهٔ روزانه (QuotaDO) ---------- */
+
+  /** خواندن سهمیهٔ همهٔ بازیکنان دارای deviceId از QuotaDO و به‌روزرسانی کش RoomState.quotaLeft */
+  private async refreshQuota(session: RoomSession): Promise<void> {
+    if (!this.env.PLAYER_QUOTA || !session.s) return;
+    const targets = session.s.players.filter((p) => p.deviceId && p.connected);
+    if (targets.length === 0) return;
+    await Promise.all(targets.map(async (p) => {
+      try {
+        const id = this.env.PLAYER_QUOTA.idFromName('q:' + p.deviceId);
+        const res = await this.env.PLAYER_QUOTA.get(id).fetch('https://quota/check', { method: 'POST', body: '{}' });
+        if (!res.ok || !session.s) return;
+        const j = await res.json<{ remaining: number }>();
+        session.s.quotaLeft[p.id] = Math.max(0, j.remaining | 0);
+      } catch { /* خطای موقت — کش با refresh بعدی همگام می‌شود */ }
+    }));
+  }
+
+  /** ثبت مصرف‌های نوبت‌های شروع‌شده در QuotaDO و اصلاح کش با پاسخ معتبر */
+  private async flushConsumes(session: RoomSession): Promise<void> {
+    if (!this.env.PLAYER_QUOTA || !session.s) return;
+    const consumed = session.takeConsumed();
+    for (const c of consumed) {
+      const p = session.s.players.find((x) => x.id === c.pid);
+      if (!p?.deviceId) continue; // بازیکن بدون deviceId — سهمیه فقط در همین لابی محاسبه می‌شود
+      try {
+        const id = this.env.PLAYER_QUOTA.idFromName('q:' + p.deviceId);
+        const res = await this.env.PLAYER_QUOTA.get(id).fetch('https://quota/consume', {
+          method: 'POST',
+          body: JSON.stringify({ seconds: c.seconds })
+        });
+        if (res.ok && session.s) {
+          const j = await res.json<{ ok: boolean; remaining: number }>();
+          session.s.quotaLeft[p.id] = Math.max(0, j.remaining | 0);
+        }
+      } catch { /* خطای موقت — کش با refresh بعدی همگام می‌شود */ }
     }
   }
 

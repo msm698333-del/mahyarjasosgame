@@ -1,6 +1,8 @@
 // پروتکل مشترک کلاینت/سرور «بازی جاسوس»
 // قانون امنیتی: اطلاعات نقش (RoleInfo) هرگز داخل PublicState پخش نمی‌شود؛ فقط به صورت پیام خصوصی به صاحب نقش می‌رود.
 
+import { Difficulty } from './wordBank';
+
 export type Phase = 'waiting' | 'revealing' | 'discussion' | 'voting' | 'spyGuess' | 'roundResult' | 'ended';
 
 /** مدت نمایش صفحهٔ «حذف‌شدهٔ دور» قبل از شروع خودکار دور بعد */
@@ -15,10 +17,11 @@ export interface GameSettings {
   discussionSeconds: number; // سقف احتیاطی کل بحث (رأی‌گیری بعد از یک دور کامل صحبت شروع می‌شود)
   voteSeconds: number;       // مدت رأی‌گیری
   guessSeconds: number;      // فرصت حدس جاسوس
-  turnSeconds: number;       // مدت هر نوبت صحبت (پیشروی خودکار)
+  turnSeconds: number;       // مدت هر نوبت — ثابت روی ۱۰ ثانیه قفل است و تغییر نمی‌کند
   skipPerPlayer: number;     // تعداد Skip Turn هر بازیکن در هر دور
   spyWord: 'nearby' | 'none'; // کلمهٔ جاسوس: نزدیک به کلمهٔ شهروندها یا بدون کلمه
-  categories: string[];      // دسته‌های فعال مکان‌ها؛ خالی = همه
+  difficulty: Difficulty;    // سطح سختی: آسان/متوسط/سخت — فاصلهٔ کلمهٔ جاسوس تا کلمهٔ شهروندها
+  categories: string[];      // دسته‌های فعال بانک کلمات؛ خالی = همه
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -27,9 +30,10 @@ export const DEFAULT_SETTINGS: GameSettings = {
   discussionSeconds: 480,
   voteSeconds: 30,
   guessSeconds: 45,
-  turnSeconds: 15,
+  turnSeconds: 10, // قانون تایمر: هر نوبت دقیقاً ۱۰ ثانیه — قفل سراسری
   skipPerPlayer: 2,
   spyWord: 'nearby',
+  difficulty: 'medium',
   categories: []
 };
 
@@ -84,6 +88,13 @@ export interface RoundResult {
   scores: Record<string, number>;
 }
 
+/** سهمیهٔ زمانی روزانهٔ خودِ بیننده — فقط به خودش نمایش داده می‌شود */
+export interface QuotaInfo {
+  remaining: number; // ثانیهٔ باقی‌ماندهٔ امروز
+  total: number;     // کل سهمیهٔ روزانه (۶۰ ثانیه)
+  day: string;       // کلید روز تهران مثل «2026-01-01» — بازنشانی ۰۰:۰۰ تهران
+}
+
 export interface PublicState {
   code: string;
   phase: Phase;
@@ -106,6 +117,8 @@ export interface PublicState {
   tally: TallyInfo | null;
   elimination: EliminationInfo | null; // حذف‌شدهٔ آخرین رأی‌گیری
   roundNote: string | null;            // یادداشت انتقال دور (مثل «هیچ رأیی ثبت نشد»)
+  turnNote: string | null;             // یادداشت گذرای نوبت (مثل ردّ خودکار به‌خاطر پایان سهمیه)
+  quota?: QuotaInfo;                   // فقط برای بیننده (هرگز در broadcast بدون viewer نمی‌آید)
   results: RoundResult | null;
   hostView?: { reports: Record<string, number> };
 }
@@ -124,7 +137,7 @@ export interface ChatMsg { from: string; name: string; text: string; ts: number 
 /* ---------- پیام‌های کلاینت → سرور ---------- */
 
 export type C2S =
-  | { t: 'hello'; name: string; avatar: number; playerId?: string; token?: string }
+  | { t: 'hello'; name: string; avatar: number; playerId?: string; token?: string; deviceId?: string }
   | { t: 'ready'; value?: boolean }
   | { t: 'start' }
   | { t: 'restart' }
@@ -184,6 +197,7 @@ export const ERR = {
   BAD_VOTE: 'bad_vote',
   NOT_SPY: 'not_spy',
   BAD_GUESS: 'bad_guess',
+  NO_QUOTA: 'no_quota',
   RATE_LIMIT: 'rate_limit',
   BAD_MSG: 'bad_message',
   LOBBY_BROKEN: 'lobby_broken'

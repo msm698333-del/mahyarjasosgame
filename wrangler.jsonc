@@ -15,10 +15,17 @@
   },
 
   // هر لابی = یک نمونه GameRoomDO (کد لابی = نام DO)
+  // سهمیهٔ روزانه = یک نمونهٔ PlayerQuotaDO به‌ازای هر deviceId
   "durable_objects": {
-    "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoomDO" }]
+    "bindings": [
+      { "name": "GAME_ROOM", "class_name": "GameRoomDO" },
+      { "name": "PLAYER_QUOTA", "class_name": "PlayerQuotaDO" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoomDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameRoomDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["PlayerQuotaDO"] }
+  ],
 
   // تاریخچهٔ بازی‌ها (D1) کاملاً اختیاری است — بازی بدون آن هم کامل کار می‌کند.
   // برای فعال‌سازی بعدی این بلوک را از حالت کامنت خارج کنید:

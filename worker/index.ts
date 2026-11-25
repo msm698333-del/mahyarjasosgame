@@ -1,10 +1,11 @@
 // ورودی Cloudflare Worker — مسیریابی REST + ارتقای WebSocket + سرو استاتیک SPA
 
 import { GameRoomDO, Env } from './do';
+import { PlayerQuotaDO } from './quota';
 import { genRoomCode } from '../shared/ids';
 import { iceServersFromEnv } from './ice';
 
-export { GameRoomDO };
+export { GameRoomDO, PlayerQuotaDO };
 
 const MAX_CREATE_RETRIES = 5;
 

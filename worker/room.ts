@@ -5,9 +5,11 @@ import {
   C2S, ERR, PublicState, RoleInfo, S2C, YouInfo
 } from '../shared/types';
 import {
-  ApplyOk, Deps, RoomState, addPlayer, apply, canJoin, createRoom, nextDeadline,
+  ApplyOk, Deps, QuotaOps, RoomState, addPlayer, apply, canJoin, createRoom, nextDeadline,
   onDeadline, playerById, pruneReveal, publicState, reattach, removePlayer, roleFor
 } from '../shared/engine';
+import { DAILY_QUOTA_SECONDS } from '../shared/quota';
+import { wordCategoryIds } from '../shared/wordBank';
 import { Rng } from '../shared/ids';
 
 export interface Transport {
@@ -42,23 +44,56 @@ export const ERROR_TEXT: Record<string, string> = {
   bad_message: 'پیام نامعتبر.',
   duplicate_name: 'این نام قبلاً در لابی استفاده شده.',
   need_players: 'برای شروع حداقل ۳ بازیکن متصل لازم است.',
-  no_location: 'مکان فعالی برای انتخاب وجود ندارد.',
-  lobby_broken: 'وضعیت لابی نامعتبر است.'
+  no_location: 'کلمهٔ فعالی برای انتخاب وجود ندارد.',
+  lobby_broken: 'وضعیت لابی نامعتبر است.',
+  no_quota: 'سهمیهٔ زمانی روزانهٔ این بازیکن تمام شده؛ نوبت به او نمی‌رسد.'
 };
 
 export class RoomSession {
   s: RoomState | null = null;
   lastPhase = '';
   alarmCb: ((at: number) => void) | null = null;
+  /** مصرف‌های سهمیهٔ این رویداد — GameRoomDO بعد از هر رویداد آن را به QuotaDO می‌فرستد */
+  readonly consumedLog: { pid: string; seconds: number }[] = [];
 
   constructor(
     private t: Transport,
     private persist: (s: RoomState) => void,
     private rng: Rng,
-    private recordMatch?: (s: RoomState) => void
+    private recordMatch?: (s: RoomState) => void,
+    private quotaEnabled = false
   ) {}
 
-  private d(now: number): Deps { return { rng: this.rng, now }; }
+  private d(now: number): Deps {
+    return {
+      rng: this.rng,
+      now,
+      ...(this.quotaEnabled ? { quota: this.quotaOps() } : {})
+    };
+  }
+
+  /** عملیات سهمیه روی کش RoomState.quotaLeft — منبع حقیقت در QuotaDO است و بعد از هر رویداد همگام می‌شود */
+  private quotaOps(): QuotaOps {
+    return {
+      left: (pid) => {
+        const v = this.s?.quotaLeft[pid];
+        return v == null ? DAILY_QUOTA_SECONDS : v;
+      },
+      consume: (pid, seconds) => {
+        if (!this.s) return;
+        const cur = this.s.quotaLeft[pid] ?? DAILY_QUOTA_SECONDS;
+        this.s.quotaLeft[pid] = Math.max(0, cur - seconds);
+        this.consumedLog.push({ pid, seconds });
+      }
+    };
+  }
+
+  /** مصرف‌های ثبت‌شدهٔ این رویداد را برمی‌گرداند و فهرست را خالی می‌کند */
+  takeConsumed(): { pid: string; seconds: number }[] {
+    const out = [...this.consumedLog];
+    this.consumedLog.length = 0;
+    return out;
+  }
 
   load(raw: unknown): void {
     if (raw && typeof raw === 'object') {
@@ -70,9 +105,20 @@ export class RoomSession {
       if (!Array.isArray(this.s.challengedIds)) this.s.challengedIds = [];
       if (this.s.chainReturnIdx === undefined) this.s.chainReturnIdx = null;
       if (!Array.isArray(this.s.usedLocationIds)) this.s.usedLocationIds = [];
+      if (!this.s.quotaLeft || typeof this.s.quotaLeft !== 'object') this.s.quotaLeft = {};
+      if (this.s.turnNote === undefined) this.s.turnNote = null;
       if (this.s.settings) {
         if (!this.s.settings.spyWord) this.s.settings.spyWord = 'nearby';
-        if (!(this.s.settings.turnSeconds >= 15)) this.s.settings.turnSeconds = 15;
+        // قانون تایمر جدید: هر نوبت دقیقاً ۱۰ ثانیه — لابی‌های قدیمی هم قفل می‌شوند
+        this.s.settings.turnSeconds = 10;
+        if (this.s.settings.difficulty !== 'easy' && this.s.settings.difficulty !== 'medium' && this.s.settings.difficulty !== 'hard') {
+          this.s.settings.difficulty = 'medium';
+        }
+        // مهاجرت دسته‌های قدیمی مکان‌ها به دسته‌های بانک کلمات — نامعتبرها حذف می‌شوند
+        const validCats = new Set<string>(wordCategoryIds());
+        if (Array.isArray(this.s.settings.categories)) {
+          this.s.settings.categories = this.s.settings.categories.filter((c) => validCats.has(c));
+        }
         if (!(this.s.settings.voteSeconds >= 15)) this.s.settings.voteSeconds = Math.max(15, this.s.settings.voteSeconds ?? 30);
       }
       for (const p of this.s.players) {
@@ -98,13 +144,27 @@ export class RoomSession {
 
   private sendState(now: number, viewerId?: string): void {
     if (!this.s) return;
-    this.t.broadcast({ t: 'state', state: publicState(this.s, now, viewerId) });
+    if (viewerId) {
+      // وضعیت اختصاصی یک بیننده (سهمیهٔ او فقط برای خودش)
+      this.t.sendTo(viewerId, { t: 'state', state: publicState(this.s, now, viewerId) });
+      return;
+    }
+    this.broadcastStates(now);
   }
 
-  /** hello: بازیکن جدید یا اتصال مجدد با token */
+  /** وضعیت شخصی‌سازی‌شده برای همهٔ بازیکنان متصل — سهمیهٔ روزانهٔ هر کس فقط در نسخهٔ خودش می‌آید */
+  broadcastStates(now: number): void {
+    if (!this.s) return;
+    for (const p of this.s.players) {
+      if (!p.connected) continue;
+      this.t.sendTo(p.id, { t: 'state', state: publicState(this.s, now, p.id) });
+    }
+  }
+
+  /** hello: بازیکن جدید یا اتصال مجدد با token — deviceId برای سهمیهٔ روزانهٔ سراسری */
   hello(
     playerIdHint: string | null, tokenHint: string | null,
-    name: string, avatar: number, now: number
+    name: string, avatar: number, now: number, deviceId?: string
   ): { playerId: string; token: string; reattached: boolean } | { err: string } {
     if (!this.s) return { err: ERR.NOT_FOUND };
 
@@ -112,6 +172,7 @@ export class RoomSession {
       const r = reattach(this.s, playerIdHint, tokenHint, this.d(now));
       if (r.err) return { err: r.err };
       const p = playerById(this.s, playerIdHint)!;
+      if (deviceId) p.deviceId = deviceId;
       this.persist(this.s);
       return { playerId: p.id, token: p.token, reattached: true };
     }
@@ -119,6 +180,7 @@ export class RoomSession {
     const r = addPlayer(this.s, String(name ?? ''), Number(avatar ?? 0), this.d(now));
     if (r.err || !r.playerId) return { err: r.err ?? ERR.BAD_NAME };
     const p = playerById(this.s, r.playerId)!;
+    if (deviceId) p.deviceId = deviceId;
     this.persist(this.s);
     return { playerId: p.id, token: p.token, reattached: false };
   }
