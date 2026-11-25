@@ -3,9 +3,9 @@ import { describe, it, expect } from 'vitest';
 import {
   RoomState, addPlayer, apply, castVote, createRoom, endRound, markReady,
   onDeadline, publicState, removePlayer, restartRound, skipTurn, spyGuess,
-  startRound, updateSettings, currentSpeakerId, playerById, setTarget, endTurn
+  startRound, updateSettings, currentSpeakerId, playerById, setTarget, endTurn, setVoice
 } from '../shared/engine';
-import { DEFAULT_SETTINGS, ERR } from '../shared/types';
+import { DEFAULT_SETTINGS, ERR, ROUND_RESULT_SECONDS } from '../shared/types';
 import { LOCATIONS, locationById } from '../shared/locations';
 
 let seed = 12345;
@@ -82,8 +82,8 @@ describe('ساخت لابی و بازیکنان', () => {
   });
 });
 
-describe('شروع دور و تخصیص نقش‌ها', () => {
-  it('نقش‌ها درست تخصیص می‌یابند و جاسوس مکان را نمی‌بیند', () => {
+describe('شروع دور و تخصیص کلمه', () => {
+  it('همهٔ شهروندها کلمهٔ یکسان می‌گیرند و جاسوس کلمهٔ نزدیک (یا هیچ) دارد', () => {
     const s = mkRoom(6);
     start(s);
     const spies = s.players.filter((p) => p.role?.isSpy);
@@ -91,18 +91,32 @@ describe('شروع دور و تخصیص نقش‌ها', () => {
     const citizens = s.players.filter((p) => p.role && !p.role.isSpy);
     expect(citizens.length).toBe(5);
     expect(s.location).not.toBeNull();
-    for (const c of citizens) {
-      expect(c.role?.locationId).toBe(s.location!.id);
-      expect(c.role?.roleName).toBeTruthy();
-    }
+    // نقطص اصلی قبلی اصلاح شده: کلمهٔ همهٔ شهروندها دقیقاً یکسان است
+    const words = new Set(citizens.map((c) => c.role?.locationName));
+    expect(words.size).toBe(1);
+    expect(citizens.every((c) => c.role?.locationId === s.location!.id)).toBe(true);
+    expect(citizens.every((c) => c.role?.locationName === s.location!.name)).toBe(true);
+    // جاسوس مکان را نمی‌بیند؛ کلمهٔ نزدیک او هرگز برابر کلمهٔ شهروندها نیست
     for (const sp of spies) {
       expect(sp.role?.locationId).toBeUndefined();
       expect(sp.role?.locationName).toBeUndefined();
+      expect(sp.role?.roleName).toBeTruthy();
+      expect(sp.role?.roleName).not.toBe(s.location!.name);
     }
     // PublicState هرگز نقش ندارد
     const ps = publicState(s, now());
     expect(JSON.stringify(ps)).not.toContain('"role"');
     expect(JSON.stringify(ps)).not.toContain(s.location!.name);
+  });
+
+  it('با تنظیم spyWord=none جاسوس هیچ کلمه‌ای نمی‌گیرد', () => {
+    const s = mkRoom(5);
+    updateSettings(s, s.hostId, { spyWord: 'none' });
+    start(s);
+    const spy = s.players.find((p) => p.role?.isSpy)!;
+    expect(spy.role?.isSpy).toBe(true);
+    expect(spy.role?.roleName).toBeUndefined();
+    expect(spy.role?.locationId).toBeUndefined();
   });
 
   it('با کمتر از ۳ بازیکن شروع نمی‌شود', () => {
@@ -135,6 +149,46 @@ describe('شروع دور و تخصیص نقش‌ها', () => {
     expect(r.err).toBeUndefined();
     expect(s.phase).toBe('revealing');
     expect(s.round).toBe(2);
+  });
+});
+
+describe('آمادگی در لابی و شروع خودکار', () => {
+  it('وقتی همهٔ متصل‌ها در لابی ready شدند بازی خودکار شروع می‌شود (بدون میزبان)', () => {
+    const s = mkRoom(4);
+    expect(s.phase).toBe('waiting');
+    // همه به‌جز میزبان آماده می‌شوند — هنوز شروع نشده
+    for (const p of s.players.slice(1)) markReady(s, p.id, deps());
+    expect(s.phase).toBe('waiting');
+    // آمادگی آخرین نفر (میزبان) → شروع خودکار
+    markReady(s, s.hostId, deps());
+    expect(s.phase).toBe('revealing');
+    expect(s.round).toBe(1);
+  });
+
+  it('اگر کسی آماده نباشد بازی شروع نمی‌شود و وضعیت آمادگی برای همه قابل مشاهده است', () => {
+    const s = mkRoom(4);
+    // سه نفر آماده می‌شوند — بازی هنوز شروع نشده
+    for (const p of s.players.slice(0, 3)) markReady(s, p.id, deps());
+    expect(s.phase).toBe('waiting');
+    // لغو آمادگی یکی → همچنان شروع نمی‌شود
+    markReady(s, s.players[0].id, deps(), false);
+    expect(s.phase).toBe('waiting');
+    const ps = publicState(s, now());
+    const pub = ps.players.find((p) => p.id === s.players[0].id)!;
+    expect(pub.ready).toBe(false);
+    expect(ps.players.filter((p) => p.ready)).toHaveLength(2);
+    // دوباره آماده می‌شود؛ ولی نفر چهارم هنوز آماده نیست → شروع نمی‌شود
+    markReady(s, s.players[0].id, deps(), true);
+    expect(s.phase).toBe('waiting');
+    // آمادگی چهارم → شروع خودکار
+    markReady(s, s.players[3].id, deps());
+    expect(s.phase).toBe('revealing');
+  });
+
+  it('آمادگی در لابی با کمتر از ۳ بازیکن شروع نمی‌کند', () => {
+    const s = mkRoom(2);
+    for (const p of s.players) markReady(s, p.id, deps());
+    expect(s.phase).toBe('waiting');
   });
 });
 
@@ -209,10 +263,58 @@ describe('فاز آماده‌سازی و بحث', () => {
   it('پایان زمان بحث → رأی‌گیری', () => {
     const s = mkRoom(4);
     start(s);
-    const r = onDeadline(s, { rng, now: s.deadline! + 1 });
+    onDeadline(s, { rng, now: s.deadline! + 1 });
     expect(s.phase).toBe('voting');
     expect(s.deadline).not.toBeNull();
-    expect(r.alarmAt).toBe(s.deadline);
+  });
+
+  it('پس از تکمیل یک دور کامل صحبت، رأی‌گیری خودکار شروع می‌شود', () => {
+    const s = mkRoom(3);
+    start(s);
+    expect(s.phase).toBe('discussion');
+    // هر بازیکن به ترتیب نوبت را تمام می‌کند
+    for (let i = 0; i < 3; i++) {
+      const sp = currentSpeakerId(s)!;
+      const r = endTurn(s, sp, deps());
+      expect(r.err).toBeUndefined();
+    }
+    // بعد از آخرین نفر → رأی‌گیری
+    expect(s.phase).toBe('voting');
+  });
+
+  it('کنترل سروری میکروفون: فقط نوبت‌دار میکروفن باز دارد؛ بقیه خودکار بسته می‌شوند', () => {
+    const s = mkRoom(4);
+    start(s);
+    // همه به گفتگو پیوسته‌اند و میکروفن روشن کرده‌اند
+    for (const p of s.players) setVoice(s, p.id, true, false, true);
+    expect(s.phase).toBe('discussion');
+    const speaker = currentSpeakerId(s)!;
+    const others = s.players.filter((p) => p.id !== speaker);
+    // فقط نوبت‌دار میکروفن باز است
+    expect(s.players.find((p) => p.id === speaker)!.micOn).toBe(true);
+    for (const o of others) expect(o.micOn).toBe(false);
+    // درخواست میکروفن خارج از نوبت → رد + هشدار خصوصی
+    const r = setVoice(s, others[0].id, true, false);
+    expect(others[0].micOn).toBe(false);
+    expect(r.direct?.[0]?.msg).toMatchObject({ t: 'error', code: 'mic_forced_off' });
+    // با رفتن نوبت، میکروفن نوبت‌دار قبلی بسته و نوبت‌دار جدید باز می‌شود
+    endTurn(s, speaker, deps());
+    const sp2 = currentSpeakerId(s)!;
+    expect(s.players.find((p) => p.id === sp2)!.micOn).toBe(true);
+    expect(s.players.find((p) => p.id === speaker)!.micOn).toBe(false);
+  });
+
+  it('در رأی‌گیری و حدس جاسوس میکروفن همه بسته است', () => {
+    const s = mkRoom(4);
+    start(s);
+    for (const p of s.players) setVoice(s, p.id, true, false, true);
+    onDeadline(s, { rng, now: s.deadline! + 1 });
+    expect(s.phase).toBe('voting');
+    for (const p of s.players) {
+      const r = setVoice(s, p.id, true, false);
+      expect(p.micOn).toBe(false);
+      expect(r.direct?.[0]?.msg).toMatchObject({ t: 'error', code: 'mic_forced_off' });
+    }
   });
 });
 
@@ -298,7 +400,7 @@ describe('رأی‌گیری و نتیجه', () => {
     expect(r.err).toBe(ERR.NOT_SPY);
   });
 
-  it('متهم کردن شهروند اشتباه → برد جاسوس', () => {
+  it('متهم شدن شهروند → حذف، افشای نقش و دور بعد (چرخهٔ مافیا)', () => {
     const s = mkRoom(4);
     toVoting(s);
     const citizens = s.players.filter((p) => !p.role?.isSpy);
@@ -307,12 +409,80 @@ describe('رأی‌گیری و نتیجه', () => {
       if (p.id === target.id) castVote(s, p.id, null, deps());
       else castVote(s, p.id, target.id, deps());
     }
-    expect(s.phase).toBe('ended');
-    expect(s.results?.spyWon).toBe(true);
-    expect(s.results?.accusedId).toBe(target.id);
+    // بازی تمام نشده: صفحهٔ نتیجهٔ دور با افشای نقش
+    expect(s.phase).toBe('roundResult');
+    expect(s.lastElimination).toEqual({ playerId: target.id, name: target.name, wasSpy: false });
+    expect(target.eliminated).toBe(true);
+    expect(s.turnOrder).not.toContain(target.id);
+    // حذف‌شده حق رأی ندارد
+    const r = castVote(s, target.id, citizens[1].id, deps());
+    expect(r.err).toBe(ERR.WRONG_PHASE);
+    // دور بعد خودکار شروع می‌شود؛ همان جاسوس، کلمهٔ جدید
+    const spyBefore = s.spyIds[0];
+    onDeadline(s, { rng, now: s.deadline! + 1 });
+    expect(s.phase).toBe('revealing');
+    expect(s.round).toBe(2);
+    expect(s.spyIds).toEqual([spyBefore]);
+    expect(s.players.find((p) => p.id === spyBefore)!.role?.isSpy).toBe(true);
   });
 
-  it('تساوی → رأی‌گیری مجدد بین متساوی‌ها؛ تساوی دوم → برد جاسوس', () => {
+  it('رسیدن شهروندها به حد بحرانی → برد جاسوس', () => {
+    const s = mkRoom(4);
+    // دور ۱: حذف یک شهروند
+    toVoting(s);
+    const spy = s.players.find((p) => p.role?.isSpy)!;
+    let civ = s.players.filter((p) => !p.role?.isSpy)[0];
+    for (const p of s.players) castVote(s, p.id, p.id === civ.id ? null : civ.id, deps());
+    expect(s.phase).toBe('roundResult');
+    onDeadline(s, { rng, now: s.deadline! + 1 });
+    // دور ۲: همه ready → بحث → همه نوبت را تمام → رأی‌گیری → حذف دومین شهروند
+    for (const p of s.players) if (p.role) markReady(s, p.id, deps());
+    expect(s.phase).toBe('discussion');
+    while (s.phase === 'discussion') {
+      const sp = currentSpeakerId(s)!;
+      endTurn(s, sp, deps());
+    }
+    expect(s.phase).toBe('voting');
+    civ = s.players.filter((p) => !p.role?.isSpy && !p.eliminated)[0];
+    for (const p of s.players.filter((x) => x.connected && !x.eliminated)) {
+      castVote(s, p.id, p.id === civ.id ? null : civ.id, deps());
+    }
+    // با ۱ شهروند و ۱ جاسوس، شهروندها به حد بحرانی رسیده‌اند
+    expect(s.phase).toBe('ended');
+    expect(s.results?.spyWon).toBe(true);
+    expect(s.results?.spyIds).toEqual([spy.id]);
+  });
+
+  it('ابستین همه → بدون حذف به دور بعد می‌رویم', () => {
+    const s = mkRoom(4);
+    toVoting(s);
+    for (const p of s.players) castVote(s, p.id, null, deps());
+    expect(s.phase).toBe('roundResult');
+    expect(s.roundNote).toBeTruthy();
+    expect(s.lastElimination).toBeNull();
+    expect(s.deadline).toBe(now() + ROUND_RESULT_SECONDS * 1000);
+    onDeadline(s, { rng, now: s.deadline! + 1 });
+    expect(s.phase).toBe('revealing');
+    expect(s.round).toBe(2);
+  });
+
+  it('حذف جاسوس با حدس غلط → وقتی جاسوس دیگری نیست بازی تمام می‌شود', () => {
+    const s = mkRoom(4);
+    toVoting(s);
+    const spy = s.players.find((p) => p.role?.isSpy)!;
+    const citizens = s.players.filter((p) => !p.role?.isSpy);
+    for (const c of citizens) castVote(s, c.id, spy.id, deps());
+    castVote(s, spy.id, null, deps());
+    expect(s.phase).toBe('spyGuess');
+    const wrong = LOCATIONS.find((l) => l.id !== s.location!.id)!.id;
+    spyGuess(s, spy.id, wrong, deps());
+    expect(s.phase).toBe('ended');
+    expect(s.results?.spyWon).toBe(false);
+    expect(s.lastElimination).toEqual({ playerId: spy.id, name: spy.name, wasSpy: true });
+    for (const c of citizens) expect(s.results?.scores[c.id]).toBe(1);
+  });
+
+  it('تساوی دوم در رأی‌گیری مجدد → برد جاسوس', () => {
     const s = mkRoom(4);
     toVoting(s);
     const [a, b, c, d] = s.players;
@@ -326,7 +496,7 @@ describe('رأی‌گیری و نتیجه', () => {
     // در رأی دوم فقط متساوی‌ها قابل انتخاب‌اند
     const r = castVote(s, a.id, c.id, deps());
     expect(r.err).toBe(ERR.BAD_VOTE);
-    // تساوی دوم
+    // تساوی دوم → پایان بازی با برد جاسوس
     castVote(s, a.id, b.id, deps());
     castVote(s, b.id, a.id, deps());
     castVote(s, c.id, a.id, deps());
@@ -334,13 +504,30 @@ describe('رأی‌گیری و نتیجه', () => {
     expect(s.phase).toBe('ended');
     expect(s.results?.spyWon).toBe(true);
   });
+});
 
-  it('ابستین همه → برد جاسوس', () => {
+describe('قفل چت متنی در طول بازی', () => {
+  it('چت در فازهای بحث/رأی‌گیری/حدس رد می‌شود و در انتظار آزاد است', () => {
     const s = mkRoom(4);
-    toVoting(s);
-    for (const p of s.players) castVote(s, p.id, null, deps());
-    expect(s.phase).toBe('ended');
-    expect(s.results?.spyWon).toBe(true);
+    const pid = s.players[0].id;
+    const r0 = apply(s, pid, { t: 'chat', text: 'سلام' }, deps());
+    expect(r0.emits?.[0]?.t).toBe('chat');
+    startRound(s, deps());
+    for (const p of s.players) if (p.role) markReady(s, p.id, deps());
+    expect(s.phase).toBe('discussion');
+    const r1 = apply(s, pid, { t: 'chat', text: 'موقع بازی' }, { rng, now: now() + 5000 });
+    expect(r1.err).toBe(ERR.CHAT_LOCKED);
+    const r2 = apply(s, pid, { t: 'sticker', id: 'spy-ok' }, { rng, now: now() + 5000 });
+    expect(r2.err).toBe(ERR.CHAT_LOCKED);
+    onDeadline(s, { rng, now: s.deadline! + 1 });
+    expect(s.phase).toBe('voting');
+    const r3 = apply(s, pid, { t: 'chat', text: 'موقع رأی' }, { rng, now: now() + 6000 });
+    expect(r3.err).toBe(ERR.CHAT_LOCKED);
+    // در نتیجهٔ دور باز می‌شود
+    onDeadline(s, { rng, now: s.deadline! + 1 });
+    expect(s.phase).toBe('roundResult');
+    const r4 = apply(s, pid, { t: 'chat', text: 'بین دورها' }, { rng, now: now() + 7000 });
+    expect(r4.emits?.[0]?.t).toBe('chat');
   });
 });
 
