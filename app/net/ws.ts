@@ -15,6 +15,7 @@ export class GameSocket {
   private identity: Identity | null = null;
   private playerId: string | undefined;
   private token: string | undefined;
+  private deviceId: string | undefined;
   private handlers: Handlers;
   private retry = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -26,11 +27,12 @@ export class GameSocket {
     this.handlers = handlers;
   }
 
-  connect(code: string, identity: Identity, playerId?: string, token?: string): Promise<void> {
+  connect(code: string, identity: Identity, playerId?: string, token?: string, deviceId?: string): Promise<void> {
     this.code = code;
     this.identity = identity;
     this.playerId = playerId;
     this.token = token;
+    this.deviceId = deviceId;
     this.closedByUser = false;
     this.retry = 0;
     return this.open();
@@ -55,6 +57,7 @@ export class GameSocket {
           t: 'hello',
           name: this.identity?.name ?? '',
           avatar: this.identity?.avatar ?? 0,
+          ...(this.deviceId ? { deviceId: this.deviceId } : {}),
           ...(this.playerId && this.token ? { playerId: this.playerId, token: this.token } : {})
         }));
         this.startPing();

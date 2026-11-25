@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { socket, useStore } from '../net/store';
 import { Btn, Chip, faNum } from '../components/ui';
-import { categoryName } from '../../shared/locations';
+import { wordCategoryName as categoryName } from '../../shared/wordBank';
 
 /** صفحه نمایش نقش مخفی — کارت پرونده‌ای با انیمیشن flip */
 export function RoleReveal() {
@@ -41,7 +41,7 @@ export function RoleReveal() {
                 ) : (
                   <div className="role-sub">شما هیچ کلمه‌ای دریافت نمی‌کنید. با شنود به سرنخ‌ها، خود را جای شهروندها جا بزنید.</div>
                 )}
-                {catName && <div className="role-cat">تنها سرنخ دیگر شما — دستهٔ مکان: <b>{catName}</b></div>}
+                {catName && <div className="role-cat">تنها سرنخ دیگر شما — دستهٔ کلمه: <b>{catName}</b></div>}
               </>
             ) : (
               <>

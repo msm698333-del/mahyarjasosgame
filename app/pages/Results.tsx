@@ -1,7 +1,7 @@
 import { socket, useStore } from '../net/store';
 import { Btn, Chip, faNum } from '../components/ui';
 import { Avatar } from '../data/avatars';
-import { categoryName } from '../../shared/locations';
+import { wordCategoryName as categoryName } from '../../shared/wordBank';
 import { StickerButton, StickerOverlay } from '../components/StickerPanel';
 import { VoiceBar } from '../components/VoiceBar';
 import { TimerBar } from '../components/TimerBar';
@@ -89,7 +89,7 @@ export function Results() {
       <div className="result-grid">
         <div className="card result-card">
           <h4>پروندهٔ این دور</h4>
-          <div className="res-row"><span className="muted">مکان مخفی:</span><b>{r.locationName}</b></div>
+          <div className="res-row"><span className="muted">کلمهٔ مخفی:</span><b>{r.locationName}</b></div>
           <div className="res-row"><span className="muted">دسته:</span><span>{categoryName(r.locationCategory)}</span></div>
           <div className="res-row"><span className="muted">جاسوس:</span>
             <span className="spy-chips">
