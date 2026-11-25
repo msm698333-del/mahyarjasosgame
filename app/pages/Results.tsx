@@ -5,7 +5,7 @@ import { categoryName } from '../../shared/locations';
 import { StickerButton, StickerOverlay } from '../components/StickerPanel';
 import { VoiceBar } from '../components/VoiceBar';
 import { TimerBar } from '../components/TimerBar';
-import { PublicState } from '../../shared/types';
+import { PublicState, SPY_WORD_GUESS } from '../../shared/types';
 
 /** صفحهٔ بین‌دوری: افشای نقش حذف‌شده + شمارش معکوس کوتاه تا دور بعد */
 export function RoundTransition({ st }: { st: PublicState }) {
@@ -105,8 +105,9 @@ export function Results() {
           )}
           {r.spyGuessId && (
             <div className="res-row"><span className="muted">حدس جاسوس:</span>
-              <span className={r.spyGuessId === r.locationId ? 'good' : 'bad'}>
-                {r.spyGuessId === r.locationId ? 'درست بود' : 'غلط بود'}
+              <span className={r.spyGuessId === r.locationId || r.spyGuessId === SPY_WORD_GUESS ? 'good' : 'bad'}>
+                {r.spyGuessId === SPY_WORD_GUESS ? 'کلمهٔ مخفی را درست نوشت'
+                  : r.spyGuessId === r.locationId ? 'درست بود' : 'غلط بود'}
               </span>
             </div>
           )}
