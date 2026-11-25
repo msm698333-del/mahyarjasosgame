@@ -990,3 +990,29 @@ body {
   .btn { flex: 0 1 auto; }
   .game-actions .btn { flex: 1 1 auto; }
 }
+
+/* ---------- آمادگی در لابی و صفحات جدید ---------- */
+.ready-status {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 10px 0 4px; padding: 10px 14px;
+  background: color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 12px;
+}
+.waiting-msg { font-size: 0.92rem; }
+.waiting-msg.go { color: var(--ok, #22c55e); font-weight: 700; }
+
+.player-card.eliminated { opacity: 0.55; filter: grayscale(0.4); }
+
+.turn-hint { color: var(--accent, #fbbf24); font-size: 0.95rem; font-weight: 600; }
+.mic-locked-note { display: inline-flex; align-items: center; gap: 6px; }
+.mic-off-note { display: flex; align-items: center; gap: 6px; }
+
+.mini-rules { margin: 4px 0 0; padding-inline-start: 18px; display: grid; gap: 6px; font-size: 0.9rem; color: var(--muted, #9aa4b2); }
+
+.chat-locked {
+  padding: 10px; border: 1px dashed var(--line);
+  border-radius: 10px; text-align: center;
+}
+
+.result-banner.neutral { border-color: var(--line); }
+.result-banner.neutral h2 { color: var(--fg, #e5eaf2); }
