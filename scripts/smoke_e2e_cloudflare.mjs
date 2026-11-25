@@ -83,25 +83,42 @@ async function main() {
   const err = await p2.wait((m) => m.t === 'error' && m.code === 'not_host');
   ok('شروع توسط غیرمیزبان رد شد', !!err);
 
-  // ۵) شروع توسط میزبان + نقش خصوصی
+  // ۵) شروع خودکار با آمادگی همه در لابی (بدون تأیید میزبان و بدون شمارش معکوس)
   host.clear(); p2.clear(); p3.clear();
-  host.send({ t: 'start' });
-  const stStarted = await p2.wait((m) => m.t === 'state' && m.state.phase === 'revealing');
-  ok('فاز revealing پخش شد', !!stStarted);
+  host.send({ t: 'ready' });
+  p2.send({ t: 'ready' });
+  const stWaiting = await p3.wait((m) => m.t === 'state' && m.state.phase === 'waiting' && m.state.readyCount === 2, 2000);
+  ok('وضعیت آمادگی در لابی برای همه قابل مشاهده است', !!stWaiting);
+  p3.send({ t: 'ready' });
+  const stStarted = await p2.wait((m) => m.t === 'state' && m.state.phase === 'revealing', 6000);
+  ok('با آمادگی همه، بازی خودکار شروع شد', !!stStarted);
   // نقش فقط از پیام خصوصی role می‌آید؛ state عمومی هرگز مکان/نقش ندارد
   const stateStr = JSON.stringify(host.msgs.filter((m) => m.t === 'state'));
   ok('state عمومی شامل اسم مکان نیست', !stateStr.includes('"locationName"') && !stateStr.includes('"isSpy"'));
   ok('state عمومی توکن ندارد', !stateStr.includes(token));
   const roleMsg = host.msgs.find((m) => m.t === 'role');
-  ok('پیام خصوصی نقش به صاحبش رسید', !!roleMsg && (roleMsg.role.isSpy === true || !!roleMsg.role.roleName));
+  ok('پیام خصوصی نقش به صاحبش رسید', !!roleMsg && (roleMsg.role.isSpy === true || !!roleMsg.role.locationName));
 
-  // ۶) آماده شدن همه → discussion
+  // ۵-ب) چت و استیکر در فاز آزاد نقش‌نمایی کار می‌کند
+  host.send({ t: 'chat', text: 'سلام همه' });
+  const chat = await p2.wait((m) => m.t === 'chat' && m.text === 'سلام همه');
+  ok('چت در فاز آزاد broadcast شد', !!chat);
+  p2.send({ t: 'sticker', id: 'magnifier' });
+  const sticker = await host.wait((m) => m.t === 'sticker' && m.id === 'magnifier');
+  ok('استیکر در فاز آزاد broadcast شد', !!sticker);
+
+  // ۶) آماده شدن همه در پروندهٔ نقش → discussion
   host.send({ t: 'ready' });
   p2.send({ t: 'ready' });
   p3.send({ t: 'ready' });
   const stDisc = await p3.wait((m) => m.t === 'state' && m.state.phase === 'discussion', 6000);
   ok('فاز discussion آغاز شد', !!stDisc);
   ok('نوبت اول تعیین شد', stDisc?.state.currentTurnIdx === 0 && stDisc.state.turnOrder.length === 3);
+
+  // ۶-ب) چت متنی در طول بازی قفل است
+  host.send({ t: 'chat', text: 'در بحث' });
+  const chatLocked = await host.wait((m) => m.t === 'error' && m.code === 'chat_locked', 1500);
+  ok('چت در فاز بحث رد شد', !!chatLocked);
 
   // ۷) نوبت‌دار skip می‌زند
   const idMap = { [w.you.id]: host, [w2.you.id]: p2, [w3.you.id]: p3 };
@@ -119,23 +136,28 @@ async function main() {
   const errTurn = await notSpeaker.wait((m) => m.t === 'error' && m.code === 'not_your_turn', 1500);
   ok('Skip توسط غیرنوبت‌دار رد شد', !!errTurn);
 
-  // ۸) انتخاب هدف توسط نوبت‌دار فعلی
-  const sp2Client = idMap[sp2Id];
-  const otherId = [w.you.id, w2.you.id, w3.you.id].find((id) => id !== sp2Id);
+  // ۸) کنترل سروری میکروفون: فقط نوبت‌دار باز است
+  const speakerNow = stSkip.state.turnOrder[stSkip.state.currentTurnIdx];
+  const speakerNowClient = idMap[speakerNow];
+  speakerNowClient.send({ t: 'voice', micOn: true, speaking: false, joined: true });
+  const micOn = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === speakerNow)?.micOn === true);
+  ok('میکروفن نوبت‌دار باز شد', !!micOn);
+  const idleId = [w.you.id, w2.you.id, w3.you.id].find((id) => id !== speakerNow);
+  const idleClient = idMap[idleId];
+  idleClient.send({ t: 'voice', micOn: true, speaking: false, joined: true });
+  const micWarn = await idleClient.wait((m) => m.t === 'error' && m.code === 'mic_forced_off', 2000);
+  ok('میکروفن خارج از نوبت رد و هشدار خصوصی رفت', !!micWarn);
+  const micOffState = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === idleId)?.micOn === false);
+  ok('میکروفن غیرنوبت‌دار سرکوب شد', !!micOffState);
+  const hasVOn = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === idleId)?.hasVoice === true);
+  ok('joined=true → hasVoice=true پخش شد (کلید همگام‌سازی peerها)', !!hasVOn);
+
+  // ۹) انتخاب هدف توسط نوبت‌دار فعلی
+  const sp2Client = idMap[speakerNow];
+  const otherId = [w.you.id, w2.you.id, w3.you.id].find((id) => id !== speakerNow);
   sp2Client.send({ t: 'target', targetId: otherId });
   const stTarget = await p3.wait((m) => m.t === 'state' && m.state.targetId === otherId);
   ok('انتخاب هدف پرسش', !!stTarget);
-
-  // ۹) چت و استیکر
-  host.send({ t: 'chat', text: 'سلام همه' });
-  const chat = await p2.wait((m) => m.t === 'chat' && m.text === 'سلام همه');
-  ok('چت broadcast شد', !!chat);
-  p2.send({ t: 'sticker', id: 'magnifier' });
-  const sticker = await host.wait((m) => m.t === 'sticker' && m.id === 'magnifier');
-  ok('استیکر broadcast شد', !!sticker);
-  p2.send({ t: 'sticker', id: 'magnifier' });
-  const spammed = await p2.wait((m) => m.t === 'error' && m.code === 'rate_limit');
-  ok('اسپم استیکر محدود شد', !!spammed);
 
   // ۱۰) رله سیگنالینگ WebRTC فقط به مقصد
   p2.send({ t: 'vsig', to: w3.you.id, data: { kind: 'offer', sdp: 'test-sdp' } });
@@ -145,16 +167,11 @@ async function main() {
   const sigLeak = await host.wait((m) => m.t === 'vsig', 700);
   ok('vsig به بقیه نشت نکرد', !sigLeak);
 
-  // ۱۱) وضعیت صدا + پیوستن/ترک گفتگو (hasVoice ← joined)
-  p2.send({ t: 'voice', micOn: true, speaking: false, joined: true });
-  const voiceState = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w2.you.id)?.micOn === true);
-  ok('وضعیت میکروفن همگام شد', !!voiceState);
-  const hasVOn = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w2.you.id)?.hasVoice === true);
-  ok('joined=true → hasVoice=true پخش شد (کلید همگام‌سازی peerها)', !!hasVOn);
+  // ۱۱) خروج از گفتگو (hasVoice ← joined=false)
   p2.send({ t: 'voice', micOn: false, speaking: false, joined: false });
   const hasVOff = await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w2.you.id)?.hasVoice === false);
   ok('joined=false → hasVoice=false و میکروفن خاموش', !!hasVOff);
-  // بازگشت به صوت برای ادامهٔ سناریو
+  // بازگشت به صوت برای ادامهٔ سناریو (میکروفن طبق نوبت سرکوب می‌شود)
   p2.clear();
   p2.send({ t: 'voice', micOn: true, speaking: false, joined: true });
   await p3.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w2.you.id)?.hasVoice === true);
