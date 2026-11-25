@@ -257,10 +257,117 @@ describe('RoomSession — جریان کامل بازی', () => {
     const w = welcomeFor(session.s!, p2.id, T0);
     expect(w).not.toBeNull();
     if (w && w.role && !w.role.isSpy) {
+      // کلمهٔ شهروندها = نام مکان؛ نقش‌های یکتا حذف شده‌اند
+      expect(typeof w.role.locationName).toBe('string');
+      expect(w.role.roleName).toBeUndefined();
+    }
+    if (w && w.role && w.role.isSpy) {
+      // جاسوس با حالت پیشفرض کلمهٔ نزدیک دارد
       expect(typeof w.role.roleName).toBe('string');
     }
     // state در welcome نقش ندارد
     expect(JSON.stringify(w?.state)).not.toContain('roleName');
     void p3;
+  });
+
+  it('چرخهٔ چنددوری کامل: آمادگی لابی → نوبت‌ها → رأی → افشا → دور بعد → حد بحرانی', () => {
+    const { session, clients } = mkSession();
+    session.initRoom('TEST', 'میزبان', 0, T0);
+    const host = joinHost(session, clients);
+    const p2 = join(session, clients, 'دو');
+    const p3 = join(session, clients, 'سه');
+    const p4 = join(session, clients, 'چهار');
+    const all = () => [host, p2, p3, p4];
+    const byId = (id: string) => all().find((c) => c.id === id)!;
+
+    // ۱) لابی: همه «آماده» → شروع خودکار (بدون پیام start از میزبان)
+    for (const c of all()) msg(session, clients, c, { t: 'ready' }, T0);
+    expect(session.s?.phase).toBe('revealing');
+    // نقش خصوصی به هر چهار نفر رسیده است
+    for (const c of all()) {
+      expect(c.inbox.some((m) => m.t === 'role')).toBe(true);
+    }
+    // کلمهٔ همهٔ شهروندها یکسان است (پیام خصوصی role)
+    const civWords = all()
+      .map((c) => welcomeFor(session.s!, c.id, T0)?.role)
+      .filter((r) => r && !r.isSpy)
+      .map((r) => r!.locationName);
+    expect(new Set(civWords).size).toBe(1);
+
+    // ۲) پروندهٔ نقش: همه آماده → بحث
+    for (const c of all()) msg(session, clients, c, { t: 'ready' }, T0);
+    expect(session.s?.phase).toBe('discussion');
+
+    // ۳) یک دور کامل نوبت ۱۵ ثانیه‌ای → رأی‌گیری خودکار
+    let guard = 0;
+    while (session.s!.phase === 'discussion' && guard++ < 10) {
+      const spId = session.s!.turnOrder[session.s!.currentTurnIdx];
+      msg(session, clients, byId(spId), { t: 'endTurn' }, T0);
+    }
+    expect(session.s?.phase).toBe('voting');
+
+    // ۴) حذف یک شهروند با رأی — با ۴ بازیکن (۳ شهروند) بازی ادامه دارد
+    const spyId = session.s!.spyIds[0];
+    const target = session.s!.players.find((p) => !session.s!.spyIds.includes(p.id) && p.connected)!;
+    for (const c of all()) {
+      msg(session, clients, c, { t: 'vote', targetId: c.id === target.id ? null : target.id }, T0);
+    }
+    expect(session.s?.phase).toBe('roundResult');
+    expect(session.s?.lastElimination?.playerId).toBe(target.id);
+    // حذف‌شده حق رأی ندارد
+    msg(session, clients, byId(target.id), { t: 'vote', targetId: spyId }, T0);
+    expect(byId(target.id).inbox.some((m) => m.t === 'error' && m.code === 'wrong_phase')).toBe(true);
+
+    // ۵) تیک آلارم → دور بعد با کلمهٔ جدید و توزیع دوبارهٔ نقش‌ها از مسیر tick
+    const roleCountBefore = all().reduce((n, c) => n + c.inbox.filter((m) => m.t === 'role').length, 0);
+    session.tick(session.s!.deadline! + 1);
+    expect(session.s?.phase).toBe('revealing');
+    expect(session.s?.round).toBe(2);
+    expect(session.s?.spyIds).toEqual([spyId]); // همان جاسوس
+    const roleCountAfter = all().reduce((n, c) => n + c.inbox.filter((m) => m.t === 'role').length, 0);
+    expect(roleCountAfter).toBeGreaterThan(roleCountBefore); // نقش‌های دوباره توزیع‌شده
+
+    // ۶) دور ۲: آماده → نوبت‌ها → رأی → حذف دومین شهروند → حد بحرانی → برد جاسوس
+    for (const c of all().filter((c) => c.id !== target.id)) {
+      msg(session, clients, c, { t: 'ready' }, T0);
+    }
+    expect(session.s?.phase).toBe('discussion');
+    guard = 0;
+    while (session.s!.phase === 'discussion' && guard++ < 10) {
+      const spId = session.s!.turnOrder[session.s!.currentTurnIdx];
+      msg(session, clients, byId(spId), { t: 'endTurn' }, T0);
+    }
+    expect(session.s?.phase).toBe('voting');
+    const alive = session.s!.players.filter((p) => p.connected && !p.eliminated);
+    const civ2 = alive.find((p) => !session.s!.spyIds.includes(p.id))!;
+    for (const p of alive) {
+      msg(session, clients, byId(p.id), { t: 'vote', targetId: p.id === civ2.id ? null : civ2.id }, T0);
+    }
+    // ۱ شهروند و ۱ جاسوس → حد بحرانی
+    expect(session.s?.phase).toBe('ended');
+    expect(session.s?.results?.spyWon).toBe(true);
+    expect(session.s?.results?.spyIds).toContain(spyId);
+  });
+
+  it('هشدار میکروفن خارج از نوبت به‌صورت پیام خصوصی می‌رسد', () => {
+    const { session, clients } = mkSession();
+    session.initRoom('TEST', 'میزبان', 0, T0);
+    const host = joinHost(session, clients);
+    const p2 = join(session, clients, 'دو');
+    const p3 = join(session, clients, 'سه');
+    // لابی: همه آماده → شروع خودکار
+    for (const c of [host, p2, p3]) msg(session, clients, c, { t: 'ready' }, T0);
+    expect(session.s?.phase).toBe('revealing');
+    // پروندهٔ نقش: همه آماده → بحث
+    for (const c of [host, p2, p3]) msg(session, clients, c, { t: 'ready' }, T0);
+    expect(session.s?.phase).toBe('discussion');
+    for (const c of [host, p2, p3]) msg(session, clients, c, { t: 'voice', micOn: true, joined: true }, T0);
+    const speakerId = session.s!.turnOrder[session.s!.currentTurnIdx];
+    const nonSpeaker = [host, p2, p3].find((c) => c.id !== speakerId)!;
+    msg(session, clients, nonSpeaker, { t: 'voice', micOn: true, speaking: true }, T0);
+    const warn = nonSpeaker.inbox.find((m) => m.t === 'error' && m.code === 'mic_forced_off');
+    expect(warn).toBeTruthy();
+    expect(session.s!.players.find((p) => p.id === nonSpeaker.id)!.micOn).toBe(false);
+    expect(session.s!.players.find((p) => p.id === nonSpeaker.id)!.speaking).toBe(false);
   });
 });
