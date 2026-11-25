@@ -6,8 +6,7 @@ import { PlayerCard } from '../components/PlayerCard';
 import { StickerOverlay } from '../components/StickerPanel';
 import { VoiceBar } from '../components/VoiceBar';
 import { TimerBar, TurnBanner } from '../components/TimerBar';
-import { IconSkip, IconMicOff, IconSearch } from '../components/Icons';
-import { LOCATIONS, CATEGORIES, categoryName } from '../../shared/locations';
+import { IconSkip, IconMicOff } from '../components/Icons';
 
 /** محیط اصلی بازی: نوبت‌های ۱۵ ثانیه‌ای صحبت صوتی (مثل مافیا) — بدون چت متنی */
 export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?: boolean }) {
@@ -25,7 +24,7 @@ export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?:
       <div className="page game">
         <StickerOverlay items={stickers} />
         <TimerBar st={st} label="فرصت حدس جاسوس" />
-        {role?.isSpy ? <SpyGuessPicker st={st} /> : <WaitingPanel text={`${speaker?.name ?? 'جاسوس'} متهم شد! حالا جاسوس یک فرصت دارد مکان مخفی را حدس بزند…`} />}
+        {role?.isSpy ? <SpyGuessTyping /> : <WaitingPanel text={`${speaker?.name ?? 'جاسوس'} متهم شد! حالا جاسوس یک فرصت دارد کلمهٔ مخفی را بنویسد…`} />}
       </div>
     );
   }
@@ -51,6 +50,7 @@ export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?:
                   <IconSkip size={18} /> رد کردن نوبت ({faNum(mePlayer.skipLeft)})
                 </Btn>
                 <Btn variant="success" size="lg" onClick={() => socket.send({ t: 'endTurn' })}>پایان نوبت</Btn>
+                <ChallengeControls st={st} meId={me.id} />
               </>
             )}
             {!isSpeaker && (
@@ -66,15 +66,48 @@ export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?:
           <div className="card side-card">
             <div className="side-head"><span>یادآوری قوانین</span></div>
             <ul className="mini-rules">
-              <li>هر بازیکن در هر دور یک نوبت ۱۵ ثانیه‌ای صحبت دارد.</li>
+              <li>هر بازیکن یک نوبت ۱۵ ثانیه‌ای صحبت دارد و ترتیب نوبت‌ها دقیقاً حفظ می‌شود.</li>
+              <li>در نوبت خود می‌توانید بازیکن دیگری را به چالش بکشید؛ به‌چالش‌کشیده‌شده می‌تواند نوبت را به بازیکن دیگر واگذار کند.</li>
               <li>میکروفن فقط در نوبت شما باز است و با پایان زمان خودکار بسته می‌شود.</li>
-              <li>کلمه را مستقیم نگویید؛ فقط سرنخ بدهید.</li>
+              <li>کلمه را مستقیم نگویید و دستهٔ کلمه را لو ندهید؛ فقط سرنخ بدهید.</li>
               <li>چت متنی در طول بازی غیرفعال است؛ ارتباط فقط صوتی در نوبت خود.</li>
-              <li>بعد از آخرین نوبت، رأی‌گیری برای حذف جاسوس شروع می‌شود.</li>
+              <li>بعد از آخرین نوبت، رأی‌گیری شروع می‌شود؛ جاسوسِ متهم‌شده با نوشتن درست کلمه برنده می‌شود.</li>
             </ul>
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/**
+ * چالش و واگذاری نوبت (قانون ۱):
+ * نوبت‌دار هر بازیکن دیگر را می‌تواند به چالش بکشد؛
+ * به‌چالش‌کشیده‌شده حق واگذاری نوبت به بازیکن دیگر را هم دارد.
+ */
+function ChallengeControls({ st, meId }: { st: PublicState; meId: string }) {
+  const targets = st.players.filter((p) => p.id !== meId && p.connected && !p.eliminated);
+  const [sel, setSel] = useState<string>('');
+  const selOk = targets.some((p) => p.id === sel) ? sel : (targets[0]?.id ?? '');
+  const challenged = st.challengedIds.includes(meId);
+  if (targets.length === 0) return null;
+  return (
+    <div className="challenge-row">
+      <select value={selOk} onChange={(e) => setSel(e.target.value)} aria-label="انتخاب بازیکن">
+        {targets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <Btn variant="warn" size="lg" disabled={!selOk}
+        onClick={() => socket.send({ t: 'challenge', targetId: selOk })}
+        title="نوبت را به این بازیکن بده">
+        به چالش کشیدن
+      </Btn>
+      {challenged && (
+        <Btn variant="primary" size="lg" disabled={!selOk}
+          onClick={() => socket.send({ t: 'passTurn', targetId: selOk })}
+          title="نوبت خود را به این بازیکن واگذار کن">
+          واگذاری نوبت
+        </Btn>
+      )}
     </div>
   );
 }
@@ -88,51 +121,43 @@ function WaitingPanel({ text }: { text: string }) {
   );
 }
 
-/** انتخابگر مکان برای حدس جاسوس */
-function SpyGuessPicker({ st }: { st: PublicState }) {
-  const [cat, setCat] = useState<string>(CATEGORIES[0].id);
-  const [q, setQ] = useState('');
-  const [sel, setSel] = useState<string | null>(null);
+/**
+ * حدس جاسوس با نوشتن کلمه (قانون ۲):
+ * کلمه باید دقیقاً و با املای درست نوشته شود؛ نوشتن با خط‌فاصله (مثل «کوه-نورد»)
+ * یا نیم‌فاصله یا فاصله — همگی بدون خطا و هشدار پذیرفته می‌شوند.
+ */
+function SpyGuessTyping() {
+  const [word, setWord] = useState('');
   const [confirm, setConfirm] = useState(false);
   const toastNow = useStore((s) => s.toastNow);
-
-  const list = LOCATIONS.filter((l) => (q ? l.name.includes(q.trim()) : l.cat === cat));
-
+  const clean = word.trim();
   return (
     <div className="card guess-panel">
-      <h3>فرصت حدس مکان مخفی — یک بار و فقط یک بار!</h3>
-      <div className="guess-tools">
-        <select value={cat} onChange={(e) => setCat(e.target.value)} disabled={!!q}>
-          {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <div className="guess-search">
-          <IconSearch size={16} />
-          <input placeholder="جستجوی مکان…" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
-      </div>
-      <div className="guess-list">
-        {list.map((l) => (
-          <button key={l.id} className={`guess-item ${sel === l.id ? 'sel' : ''}`} onClick={() => setSel(l.id)}>
-            {l.name}
-            <span className="muted small">{categoryName(l.cat)}</span>
-          </button>
-        ))}
-      </div>
+      <h3>کلمهٔ مخفی را بنویسید — فقط یک فرصت!</h3>
+      <p className="muted small">املای درست کافی است؛ نوشتن با خط‌فاصله (مثل «کوه-نورد») یا بدون آن پذیرفته می‌شود.</p>
+      <input
+        className="guess-input"
+        dir="rtl"
+        placeholder="کلمهٔ مخفی…"
+        value={word}
+        maxLength={60}
+        onChange={(e) => setWord(e.target.value)}
+      />
       <div className="guess-actions">
-        <Btn variant="danger" size="lg" disabled={!sel} onClick={() => setConfirm(true)}>
-          حدس نهایی: {sel ? LOCATIONS.find((l) => l.id === sel)?.name : '—'}
+        <Btn variant="danger" size="lg" disabled={clean.length < 2} onClick={() => setConfirm(true)}>
+          ثبت حدس کلمه
         </Btn>
       </div>
-      {confirm && sel && (
+      {confirm && (
         <div className="modal-backdrop" onClick={() => setConfirm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head"><h3>مطمئن هستید؟</h3></div>
             <div className="modal-body">
-              <p>حدس شما <b>{LOCATIONS.find((l) => l.id === sel)?.name}</b> است. فقط یک فرصت دارید و بعد از تأیید، نتیجه اعلام می‌شود.</p>
+              <p>حدس شما <b>{clean}</b> است. فقط یک فرصت دارید و بعد از تأیید، نتیجه اعلام می‌شود.</p>
               <div className="row-actions">
                 <Btn variant="ghost" onClick={() => setConfirm(false)}>نه، برگرد</Btn>
                 <Btn variant="danger" onClick={() => {
-                  socket.send({ t: 'spyGuess', locationId: sel });
+                  socket.send({ t: 'spyGuessWord', word: clean });
                   setConfirm(false);
                   toastNow('حدس شما ثبت شد.', 'info');
                 }}>بله، حدس نهایی</Btn>

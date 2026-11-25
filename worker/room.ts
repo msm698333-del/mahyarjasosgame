@@ -29,6 +29,7 @@ export const ERROR_TEXT: Record<string, string> = {
   not_host: 'این کار فقط از دست میزبان برمی‌آید.',
   wrong_phase: 'این عملیات در این مرحله از بازی مجاز نیست.',
   not_your_turn: 'الان نوبت شما نیست.',
+  not_challenged: 'فقط بازیکن به‌چالش‌کشیده‌شده می‌تواند نوبت را واگذار کند.',
   no_skips: 'سهمیهٔ رد کردن نوبت شما تمام شده است.',
   chat_locked: 'در طول بازی چت متنی غیرفعال است؛ ارتباط فقط صوتی و در نوبت خودتان است.',
   mic_forced_off: 'الان نوبت شما نیست؛ میکروفن فقط در نوبت شما باز می‌شود.',
@@ -66,6 +67,9 @@ export class RoomSession {
       if (!Array.isArray(this.s.spyIds)) this.s.spyIds = [];
       if (this.s.lastElimination === undefined) this.s.lastElimination = null;
       if (this.s.roundNote === undefined) this.s.roundNote = null;
+      if (!Array.isArray(this.s.challengedIds)) this.s.challengedIds = [];
+      if (this.s.chainReturnIdx === undefined) this.s.chainReturnIdx = null;
+      if (!Array.isArray(this.s.usedLocationIds)) this.s.usedLocationIds = [];
       if (this.s.settings) {
         if (!this.s.settings.spyWord) this.s.settings.spyWord = 'nearby';
         if (!(this.s.settings.turnSeconds >= 15)) this.s.settings.turnSeconds = 15;
