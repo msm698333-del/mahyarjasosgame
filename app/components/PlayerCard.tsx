@@ -20,6 +20,7 @@ export function PlayerCard({ p, st, me }: { p: PlayerPublic; st: PublicState; me
     <div className={[
       'player-card',
       !p.connected ? 'offline' : '',
+      p.eliminated ? 'eliminated' : '',
       speaking ? 'speaking' : '',
       isSpeaker ? 'on-turn' : '',
       isTarget ? 'is-target' : ''
@@ -37,6 +38,10 @@ export function PlayerCard({ p, st, me }: { p: PlayerPublic; st: PublicState; me
         </div>
         <div className="pc-badges">
           <Chip tone="muted">{faNum(p.score)} امتیاز</Chip>
+          {(st.phase === 'waiting' || st.phase === 'revealing') && p.ready && (
+            <Chip tone="teal">آماده</Chip>
+          )}
+          {p.eliminated && <Chip tone="danger">حذف‌شده</Chip>}
           {st.phase === 'discussion' && p.skipLeft >= 0 && p.id === me.id && (
             <Chip tone="gold">رد کردن: {faNum(p.skipLeft)}</Chip>
           )}
