@@ -1,8 +1,8 @@
 // موتور بازی «جاسوس» — منطق خالص و قابل‌تست، بدون وابستگی به Workers یا DOM
 // همهٔ اعتبارسنجی‌ها سمت سرور همین‌جا انجام می‌شود؛ کلاینت هیچ‌وقت منبع حقیقت نیست.
 
-import { C2S, ERR, GameSettings, Phase, PublicState, RoleInfo, RoundResult, S2C, TallyInfo, YouInfo, DEFAULT_SETTINGS, EliminationInfo, ROUND_RESULT_SECONDS } from './types';
-import { LocationDef, LOCATIONS, locationById, pickLocation } from './locations';
+import { C2S, ERR, GameSettings, Phase, PublicState, RoleInfo, RoundResult, S2C, TallyInfo, YouInfo, DEFAULT_SETTINGS, EliminationInfo, ROUND_RESULT_SECONDS, SPY_WORD_GUESS } from './types';
+import { LocationDef, LOCATIONS, locationById, pickLocation, locationPoolSize } from './locations';
 import { genToken, newPlayerId, Rng } from './ids';
 
 export interface Player {
@@ -53,6 +53,9 @@ export interface RoomState {
   spyGuessId: string | null;
   lastStickerAt: Record<string, number>;
   lastChatAt: Record<string, number>;
+  chainReturnIdx: number | null; // ادامهٔ چرخهٔ نوبت از این صندلی، بعد از پایان زنجیرهٔ چالش/واگذاری
+  challengedIds: string[];       // بازیکنانی که با چالش/واگذاری وارد نوبت شده‌اند (حق واگذاری دارند)
+  usedLocationIds: string[];     // کلمه‌های اعلام‌شده در این لابی — قانون تکرارنکردن
 }
 
 export interface Deps {
@@ -94,7 +97,8 @@ export function createRoom(code: string, hostName: string, hostAvatar: number, d
     turnOrder: [], currentTurnIdx: -1, turnEndsAt: null, deadline: null, targetId: null,
     spyIds: [], readyIds: [], votes: {}, voteRound: 1, tiedIds: null, tally: null,
     lastElimination: null, roundNote: null, results: null,
-    spyGuessId: null, lastStickerAt: {}, lastChatAt: {}
+    spyGuessId: null, lastStickerAt: {}, lastChatAt: {},
+    chainReturnIdx: null, challengedIds: [], usedLocationIds: []
   };
 }
 
@@ -126,7 +130,7 @@ export function publicState(s: RoomState, now: number, viewerId?: string): Publi
     code: s.code, phase: s.phase, settings: { ...s.settings }, players,
     hostId: s.hostId, createdAt: s.createdAt, round: s.round, serverNow: now,
     deadline: s.deadline ?? undefined, turnOrder: s.turnOrder, currentTurnIdx: s.currentTurnIdx,
-    turnEndsAt: s.turnEndsAt ?? undefined, targetId: s.targetId,
+    turnEndsAt: s.turnEndsAt ?? undefined, targetId: s.targetId, challengedIds: [...s.challengedIds],
     readyCount: s.readyIds.length, votesSubmitted: Object.keys(s.votes).length,
     voteRound: s.voteRound, tiedIds: s.tiedIds, tally: s.tally,
     elimination: s.lastElimination, roundNote: s.roundNote, results: s.results
@@ -269,8 +273,12 @@ export function startRound(s: RoomState, d: Deps): ApplyOk & { err?: string } {
     for (const p of s.players) p.eliminated = false;
   }
   const spyCount = Math.min(s.settings.spyCount, Math.floor(active.length / 3) || 1);
-  const loc = pickLocation(s.settings.categories.length ? s.settings.categories : null, d.rng);
+  // قانون تکرارنکردن: کلمهٔ اعلام‌شدهٔ قبلی دوباره انتخاب نمی‌شود تا بانک دسته‌ها تمام شود
+  const catIds = s.settings.categories.length ? s.settings.categories : null;
+  if (s.usedLocationIds.length >= locationPoolSize(catIds)) s.usedLocationIds = [];
+  const loc = pickLocation(catIds, d.rng, s.usedLocationIds);
   if (!loc) return { changed: false, err: 'no_location' };
+  s.usedLocationIds.push(loc.id);
 
   let spyIds = s.spyIds.filter((id) => active.some((p) => p.id === id));
   if (freshMatch) {
@@ -298,6 +306,8 @@ export function startRound(s: RoomState, d: Deps): ApplyOk & { err?: string } {
   s.readyIds = [];
   s.lastElimination = null;
   s.roundNote = null;
+  s.chainReturnIdx = null;
+  s.challengedIds = [];
 
   const order = shuffle(active.map((p) => p.id), d.rng);
   const spySet = new Set(spyIds);
@@ -421,6 +431,8 @@ export function startDiscussion(s: RoomState, d: Deps): ApplyOk {
   s.currentTurnIdx = 0;
   s.turnEndsAt = d.now + s.settings.turnSeconds * 1000;
   s.targetId = null;
+  s.chainReturnIdx = null;
+  s.challengedIds = [];
   syncTurnMics(s);
   return { changed: true, alarmAt: Math.min(s.deadline, s.turnEndsAt) };
 }
@@ -433,7 +445,14 @@ export function startDiscussion(s: RoomState, d: Deps): ApplyOk {
  */
 function advanceTurn(s: RoomState, d: Deps): ApplyOk {
   if (s.phase !== 'discussion' || s.turnOrder.length === 0) return { changed: false };
-  const oldIdx = s.currentTurnIdx;
+  // پایان زنجیرهٔ چالش/واگذاری: چرخهٔ اصلی دقیقاً از نوبتِ بعد از چالش‌کنندهٔ اصلی ادامه پیدا می‌کند
+  let oldIdx = s.currentTurnIdx;
+  if (s.chainReturnIdx != null) {
+    if (s.chainReturnIdx >= s.turnOrder.length) s.chainReturnIdx = 0;
+    oldIdx = (s.chainReturnIdx - 1 + s.turnOrder.length) % s.turnOrder.length;
+    s.challengedIds = [];
+    s.chainReturnIdx = null;
+  }
   let newIdx = oldIdx;
   for (let i = 0; i < s.turnOrder.length; i++) {
     newIdx = (newIdx + 1) % s.turnOrder.length;
@@ -480,6 +499,47 @@ export function setTarget(s: RoomState, playerId: string, targetId: string): App
   return { changed: true };
 }
 
+/* ---------- چالش و واگذاری نوبت ---------- */
+
+/**
+ * قانون چرخهٔ نوبت: هر بازیکن در نوبت خود می‌تواند بازیکن دیگری را به چالش بکشد؛
+ * نوبت بلافاصله به او می‌رسد و تایمر نوبتش از نو شروع می‌شود.
+ * به‌چالش‌کشیده‌شده می‌تواند نوبت را به بازیکن دیگری واگذار کند و زنجیره به همین شکل ادامه پیدا می‌کند.
+ * ترتیب اصلی حفظ می‌شود: بعد از پایان زنجیره، چرخه از نوبتِ بعد از چالش‌کنندهٔ اول ادامه می‌یابد.
+ */
+function takeTurnViaChain(s: RoomState, targetId: string, d: Deps): ApplyOk | { err: string; changed: false } {
+  const t = playerById(s, targetId);
+  if (!t || t.id === s.turnOrder[s.currentTurnIdx] || !t.connected || t.eliminated) {
+    return { changed: false, err: ERR.BAD_TARGET };
+  }
+  const idx = s.turnOrder.indexOf(targetId);
+  if (idx < 0) return { changed: false, err: ERR.BAD_TARGET };
+  if (s.chainReturnIdx == null) {
+    s.chainReturnIdx = (s.currentTurnIdx + 1) % s.turnOrder.length;
+  }
+  s.currentTurnIdx = idx;
+  if (!s.challengedIds.includes(targetId)) s.challengedIds.push(targetId);
+  s.turnEndsAt = d.now + s.settings.turnSeconds * 1000;
+  s.targetId = null;
+  syncTurnMics(s);
+  return { changed: true, alarmAt: nextDeadline(s) };
+}
+
+/** نوبت‌دار: به چالش کشیدن بازیکن دیگر */
+export function challenge(s: RoomState, playerId: string, targetId: string, d: Deps): ApplyOk {
+  if (s.phase !== 'discussion') return { changed: false, err: ERR.WRONG_PHASE };
+  if (currentSpeakerId(s) !== playerId) return { changed: false, err: ERR.NOT_YOUR_TURN };
+  return takeTurnViaChain(s, targetId, d);
+}
+
+/** به‌چالش‌کشیده‌شده: واگذاری نوبت به بازیکن دیگر */
+export function passTurn(s: RoomState, playerId: string, targetId: string, d: Deps): ApplyOk {
+  if (s.phase !== 'discussion') return { changed: false, err: ERR.WRONG_PHASE };
+  if (currentSpeakerId(s) !== playerId) return { changed: false, err: ERR.NOT_YOUR_TURN };
+  if (!s.challengedIds.includes(playerId)) return { changed: false, err: ERR.NOT_CHALLENGED };
+  return takeTurnViaChain(s, targetId, d);
+}
+
 /* ---------- رأی‌گیری ---------- */
 
 function beginVoting(s: RoomState, d: Deps, tiedIds: string[] | null): ApplyOk {
@@ -489,6 +549,8 @@ function beginVoting(s: RoomState, d: Deps, tiedIds: string[] | null): ApplyOk {
   s.votes = {};
   s.tally = null;
   s.deadline = d.now + s.settings.voteSeconds * 1000;
+  s.chainReturnIdx = null;
+  s.challengedIds = [];
   syncTurnMics(s); // در رأی‌گیری میکروفن همه بسته است
   return { changed: true, alarmAt: s.deadline };
 }
@@ -530,6 +592,8 @@ function gotoRoundResult(s: RoomState, d: Deps, note: string | null): ApplyOk {
   s.roundNote = note;
   s.deadline = d.now + ROUND_RESULT_SECONDS * 1000;
   s.turnEndsAt = null;
+  s.chainReturnIdx = null;
+  s.challengedIds = [];
   syncTurnMics(s);
   return { changed: true, alarmAt: s.deadline };
 }
@@ -603,6 +667,43 @@ export function spyGuess(s: RoomState, playerId: string, locationId: string, d: 
     return afterCaughtSpy(s, d, true, `${p.name} متهم شد اما مکان مخفی را درست حدس زد؛ جاسوس‌ها برنده شدند!`);
   }
   return afterCaughtSpy(s, d, false, `${p.name} متهم و حذف شد و حدس مکان هم غلط بود؛ ${s.turnOrder.filter((id) => s.spyIds.includes(id)).length > 0 ? 'بازی ادامه دارد.' : 'شهروندها برنده شدند!'}`);
+}
+
+/**
+ * یکسان‌سازی املا برای مقایسهٔ کلمه‌ها:
+ * خط‌فاصله، نیم‌فاصله، فاصله و اعراب حذف؛ «ي/ك» عربی به «ی/ک» فارسی تبدیل.
+ * بنابراین نوشتن کلمه با خط‌فاصله (مثل «کوه-نورد») یا نیم‌فاصله یا بدون آن، همگی پذیرفته می‌شود.
+ */
+export function normalizeWord(s0: string): string {
+  return String(s0 ?? '')
+    .replace(/[\u064B-\u065F\u0670]/g, '')            // اعراب
+    .replace(/[\u200B-\u200F\u202A-\u202E]/g, '')     // نیم‌فاصله و کاراکترهای کنترلی جهت
+    .replace(/[\u064A\u0649]/g, '\u06CC')              // ي/ى عربی → ی
+    .replace(/\u0643/g, '\u06A9')                       // ك عربی → ک
+    .replace(/[\u0623\u0625\u0671]/g, '\u0627')        // أ/إ/ٱ → ا
+    .replace(/[\u002D\u2010-\u2015\u0640]/g, '')       // خط‌فاصله و کشیده
+    .replace(/[\s\u00A0]/g, '')
+    .trim();
+}
+
+/**
+ * حدس جاسوس با نوشتن کلمه (قانون ۲):
+ * جاسوس کلمه را دقیقاً و با املای درست می‌نویسد — نوشتن با خط‌فاصله (مثل «کلمه-کلمه»)
+ * بدون هیچ خطا یا هشدار پذیرفته می‌شود. درست = برد جاسوس؛ غلط = حذف او.
+ */
+export function spyGuessWord(s: RoomState, playerId: string, word0: string, d: Deps): ApplyOk {
+  if (s.phase !== 'spyGuess') return { changed: false, err: ERR.WRONG_PHASE };
+  const p = playerById(s, playerId);
+  if (!p?.role?.isSpy) return { changed: false, err: ERR.NOT_SPY };
+  if (s.spyGuessId) return { changed: false, err: ERR.BAD_GUESS };
+  const word = normalizeWord(String(word0 ?? ''));
+  if (!word || word.length < 2) return { changed: false, err: ERR.BAD_GUESS };
+  s.spyGuessId = SPY_WORD_GUESS;
+  const target = normalizeWord(s.location?.name ?? '');
+  if (target && word === target) {
+    return afterCaughtSpy(s, d, true, `${p.name} متهم شد اما کلمهٔ مخفی را دقیق نوشت؛ جاسوس‌ها برنده شدند!`);
+  }
+  return afterCaughtSpy(s, d, false, `${p.name} متهم و حذف شد و کلمهٔ نوشته‌شده هم غلط بود؛ ${s.turnOrder.filter((id) => s.spyIds.includes(id)).length > 0 ? 'بازی ادامه دارد.' : 'شهروندها برنده شدند!'}`);
 }
 
 export function endRound(s: RoomState, d: Deps, spyWon: boolean, accusedId: string | null, reason: string): ApplyOk {
@@ -824,6 +925,12 @@ export function apply(s: RoomState, playerId: string | null, msg: C2S, d: Deps):
     case 'endTurn':
       if (!playerId) return { changed: false, err: ERR.BAD_MSG };
       return endTurn(s, playerId, d);
+    case 'challenge':
+      if (!playerId) return { changed: false, err: ERR.BAD_MSG };
+      return challenge(s, playerId, String(msg.targetId ?? ''), d);
+    case 'passTurn':
+      if (!playerId) return { changed: false, err: ERR.BAD_MSG };
+      return passTurn(s, playerId, String(msg.targetId ?? ''), d);
     case 'target':
       if (!playerId) return { changed: false, err: ERR.BAD_MSG };
       return setTarget(s, playerId, String(msg.targetId ?? ''));
@@ -835,6 +942,9 @@ export function apply(s: RoomState, playerId: string | null, msg: C2S, d: Deps):
     case 'spyGuess':
       if (!playerId) return { changed: false, err: ERR.BAD_MSG };
       return spyGuess(s, playerId, String(msg.locationId ?? ''), d);
+    case 'spyGuessWord':
+      if (!playerId) return { changed: false, err: ERR.BAD_MSG };
+      return spyGuessWord(s, playerId, String(msg.word ?? ''), d);
     case 'voice': {
       if (!playerId) return { changed: false, err: ERR.BAD_MSG };
       return setVoice(s, playerId, !!msg.micOn, !!msg.speaking, msg.joined === undefined ? undefined : !!msg.joined);
