@@ -1,14 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PublicState } from '../../shared/types';
 import { socket, useStore } from '../net/store';
 import { Btn, faNum } from '../components/ui';
 import { PlayerCard } from '../components/PlayerCard';
 import { StickerOverlay } from '../components/StickerPanel';
 import { VoiceBar } from '../components/VoiceBar';
-import { TimerBar, TurnBanner } from '../components/TimerBar';
+import { TimerBar, TurnBanner, QuotaChip } from '../components/TimerBar';
 import { IconSkip, IconMicOff } from '../components/Icons';
 
-/** محیط اصلی بازی: نوبت‌های ۱۵ ثانیه‌ای صحبت صوتی (مثل مافیا) — بدون چت متنی */
+/** محیط اصلی بازی: نوبت‌های دقیقاً ۱۰ ثانیه‌ای صحبت صوتی (مثل مافیا) — بدون چت متنی */
 export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?: boolean }) {
   const me = useStore((s) => s.you);
   const role = useStore((s) => s.role);
@@ -33,6 +33,7 @@ export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?:
     <div className="page game">
       <StickerOverlay items={stickers} />
       <TimerBar st={st} label="نوبت صحبت" mode="turn" />
+      <TimeUpBanner st={st} />
       <TurnBanner st={st} meId={me.id} />
 
       <div className="game-grid">
@@ -63,14 +64,20 @@ export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?:
         </section>
 
         <aside className="game-side">
+          <div className="card side-card quota-card">
+            <div className="side-head"><span>سهمیهٔ زمانی روزانه</span></div>
+            <QuotaChip st={st} />
+            <p className="muted small">هر نوبت دقیقاً ۱۰ ثانیه است و ۱۰ ثانیه از سهمیهٔ ۶۰ ثانیه‌ای امروز کم می‌کند. سهمیه در ساعت ۰۰:۰۰ تهران بازنشانی می‌شود و مصرف‌شده با خروج و ورود مجدد برنمی‌گردد.</p>
+          </div>
           <div className="card side-card">
             <div className="side-head"><span>یادآوری قوانین</span></div>
             <ul className="mini-rules">
-              <li>هر بازیکن یک نوبت ۱۵ ثانیه‌ای صحبت دارد و ترتیب نوبت‌ها دقیقاً حفظ می‌شود.</li>
+              <li>هر بازیکن یک نوبت دقیقاً ۱۰ ثانیه‌ای صحبت دارد؛ تایمر سمت سرور است و هیچ‌کس نمی‌تواند آن را متوقف یا تمدید کند.</li>
+              <li>با رسیدن تایمر به صفر، نوبت خودکار به بازیکن بعدی می‌رسد.</li>
               <li>در نوبت خود می‌توانید بازیکن دیگری را به چالش بکشید؛ به‌چالش‌کشیده‌شده می‌تواند نوبت را به بازیکن دیگر واگذار کند.</li>
               <li>میکروفن فقط در نوبت شما باز است و با پایان زمان خودکار بسته می‌شود.</li>
               <li>کلمه را مستقیم نگویید و دستهٔ کلمه را لو ندهید؛ فقط سرنخ بدهید.</li>
-              <li>چت متنی در طول بازی غیرفعال است؛ ارتباط فقط صوتی در نوبت خود.</li>
+              <li>سهمیهٔ روزانهٔ هر بازیکن ۶۰ ثانیه است (هر نوبت ۱۰ ثانیه)؛ پس از پایان سهمیه، نوبت جدید شروع نمی‌شود.</li>
               <li>بعد از آخرین نوبت، رأی‌گیری شروع می‌شود؛ جاسوسِ متهم‌شده با نوشتن درست کلمه برنده می‌شود.</li>
             </ul>
           </div>
@@ -78,6 +85,32 @@ export function GameRoom({ st, spyGuessMode }: { st: PublicState; spyGuessMode?:
       </div>
     </div>
   );
+}
+
+/**
+ * پیام پایان زمان (قانون ۵): با رسیدن تایمر نوبت به صفر، سرور نوبت را خودکار عوض می‌کند؛
+ * تغییر گوینده در وسط بحث یک پیام کوتاه «زمان تمام شد» نمایش می‌دهد.
+ */
+function TimeUpBanner({ st }: { st: PublicState }) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const prevRef = useRef<{ idx: number; count: number } | null>(null);
+  useEffect(() => {
+    if (st.phase !== 'discussion') {
+      prevRef.current = null;
+      return;
+    }
+    const prev = prevRef.current;
+    const cur = { idx: st.currentTurnIdx, count: st.turnOrder.length };
+    prevRef.current = cur;
+    if (prev && prev.idx !== cur.idx && cur.count > 1) {
+      const next = st.players.find((p) => p.id === st.turnOrder[st.currentTurnIdx]);
+      setMsg(`زمان تمام شد! نوبت به ${next?.name ?? 'بازیکن بعدی'} رسید.`);
+      const t = setTimeout(() => setMsg(null), 3200);
+      return () => clearTimeout(t);
+    }
+  }, [st.currentTurnIdx, st.phase, st.turnOrder.length]);
+  if (!msg) return null;
+  return <div className="timeup-banner">{msg}</div>;
 }
 
 /**
