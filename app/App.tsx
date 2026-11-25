@@ -9,7 +9,7 @@ import { Lobby } from './pages/Lobby';
 import { RoleReveal } from './pages/RoleReveal';
 import { GameRoom } from './pages/GameRoom';
 import { Voting } from './pages/Voting';
-import { Results } from './pages/Results';
+import { Results, RoundTransition } from './pages/Results';
 import { SettingsModal } from './pages/Settings';
 
 export default function App() {
@@ -26,7 +26,12 @@ export default function App() {
       const speaking = voice.status().speaking;
       socket.send({ t: 'voice', micOn, speaking, ...(joined !== undefined ? { joined } : {}) });
     };
-    return () => { voice.onVoiceUpdate = null; };
+    // هشدارهای میوت خودکار (صحبت خارج از نوبت) به‌صورت toast
+    voice.warnCb = (message) => useStore.getState().toastNow(message, 'info');
+    return () => {
+      voice.onVoiceUpdate = null;
+      voice.warnCb = null;
+    };
   }, []);
 
   // پاکسازی هنگام بستن صفحه
@@ -119,6 +124,9 @@ export default function App() {
       break;
     case 'spyGuess':
       page = <GameRoom st={state} spyGuessMode />;
+      break;
+    case 'roundResult':
+      page = <RoundTransition st={state} />;
       break;
     case 'ended':
       page = <Results />;

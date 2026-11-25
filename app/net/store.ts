@@ -187,13 +187,15 @@ export const socket = new GameSocket({
         if (prevPhase && prevPhase !== msg.state.phase) {
           if (msg.state.phase === 'discussion') sfx.play('turn');
           if (msg.state.phase === 'voting') sfx.play('alert');
+          if (msg.state.phase === 'roundResult') sfx.play('vote');
           if (msg.state.phase === 'ended') {
-            const iAmSpy = !!s.role?.isSpy;
+            const iAmSpy = !!s.role?.isSpy || (msg.state.results?.spyIds ?? []).includes(s.you?.id ?? '');
             const spyWon = !!msg.state.results?.spyWon;
             sfx.play(iAmSpy === spyWon ? 'win' : 'lose');
           }
         }
         voice.syncPeers(msg.state);
+        voice.applyVoicePolicy(msg.state);
         break;
       }
       case 'role': {
@@ -222,6 +224,8 @@ export const socket = new GameSocket({
         break;
       }
       case 'error': {
+        // میوت خودکار با فرمان سرور (صحبت خارج از نوبت)
+        if (msg.code === 'mic_forced_off') voice.forceMicOff();
         s.toastNow(msg.message);
         sfx.play('alert');
         break;
