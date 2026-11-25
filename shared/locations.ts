@@ -129,15 +129,28 @@ export const LOCATIONS: LocationDef[] = [
   { id: 'time-machine', name: 'کارخانهٔ ماشین زمان', cat: 'fantasy', roles: ['مهندس اصلی زمان', 'مدیر پروندهٔ تاریخ', 'مسافر آینده', 'متخصص موتور مکانیکی', 'نگهبان سال‌های قفل‌شده', 'دستیار سوخت کوارتز', 'پزشک پارادوکس', 'تعمیرکار چرخ‌دنده‌ها'] }
 ];
 
-/** انتخاب تصادفی مکان از دسته‌های فعال (خالی = همه دسته‌ها) */
-export function pickLocation(catIds: string[] | null, rng: () => number): LocationDef | null {
+/**
+ * انتخاب تصادفی مکان از دسته‌های فعال (خالی = همه دسته‌ها).
+ * قانون تکرارنکردن: کلمه‌هایی که در exclude باشند (کلمه‌های اعلام‌شدهٔ قبلی)
+ * تا وقتی گزینهٔ تازه هست انتخاب نمی‌شوند؛ فقط اگر بانک دسته تمام شود اجازهٔ تکرار دارد.
+ */
+export function pickLocation(catIds: string[] | null, rng: () => number, exclude: string[] = []): LocationDef | null {
   let pool = LOCATIONS;
   if (catIds && catIds.length > 0) {
     const allowed = new Set(catIds);
     const filtered = LOCATIONS.filter((l) => allowed.has(l.cat));
     if (filtered.length > 0) pool = filtered;
   }
-  return pool[Math.floor(rng() * pool.length)] ?? null;
+  const fresh = pool.filter((l) => !exclude.includes(l.id));
+  const finalPool = fresh.length > 0 ? fresh : pool;
+  return finalPool[Math.floor(rng() * finalPool.length)] ?? null;
+}
+
+/** تعداد مکان‌های موجود در دسته‌های فعال — برای ریست فهرست کلمه‌های استفاده‌شده */
+export function locationPoolSize(catIds: string[] | null): number {
+  if (!catIds || catIds.length === 0) return LOCATIONS.length;
+  const allowed = new Set(catIds);
+  return LOCATIONS.filter((l) => allowed.has(l.cat)).length;
 }
 
 export function locationById(id: string): LocationDef | undefined {

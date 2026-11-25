@@ -6,6 +6,9 @@ export type Phase = 'waiting' | 'revealing' | 'discussion' | 'voting' | 'spyGues
 /** مدت نمایش صفحهٔ «حذف‌شدهٔ دور» قبل از شروع خودکار دور بعد */
 export const ROUND_RESULT_SECONDS = 12;
 
+/** نشانگر «حدس با نوشتن کلمه» در نتایج دور (به‌جای شناسهٔ مکان) */
+export const SPY_WORD_GUESS = '__word__';
+
 export interface GameSettings {
   maxPlayers: number;        // 3..12
   spyCount: number;          // 1..2
@@ -94,7 +97,8 @@ export interface PublicState {
   turnOrder: string[];
   currentTurnIdx: number;
   turnEndsAt?: number;
-  targetId: string | null;  // بازیکنی که نوبت‌دار از او پرسش می‌کند
+  targetId: string | null;          // بازیکنی که نوبت‌دار از او پرسش می‌کند
+  challengedIds: string[];          // بازیکنانی که با چالش/واگذاری وارد نوبت شده‌اند (حق واگذاری دارند)
   readyCount: number;
   votesSubmitted: number;
   voteRound: number;
@@ -129,9 +133,12 @@ export type C2S =
   | { t: 'sticker'; id: string }
   | { t: 'skipTurn' }
   | { t: 'endTurn' }
+  | { t: 'challenge'; targetId: string }   // نوبت‌دار بازیکن دیگری را به چالش می‌کشد
+  | { t: 'passTurn'; targetId: string }    // به‌چالش‌کشیده‌شده نوبت را به دیگری واگذار می‌کند
   | { t: 'target'; targetId: string }
   | { t: 'vote'; targetId: string | null }
   | { t: 'spyGuess'; locationId: string }
+  | { t: 'spyGuessWord'; word: string }    // حدس با نوشتن کلمه — املای درست با خط‌فاصله پذیرفته می‌شود
   | { t: 'voice'; micOn: boolean; speaking?: boolean; joined?: boolean }
   | { t: 'vsig'; to: string; data: unknown }
   | { t: 'report'; targetId: string }
@@ -169,6 +176,7 @@ export const ERR = {
   NOT_HOST: 'not_host',
   WRONG_PHASE: 'wrong_phase',
   NOT_YOUR_TURN: 'not_your_turn',
+  NOT_CHALLENGED: 'not_challenged',
   NO_SKIPS: 'no_skips',
   CHAT_LOCKED: 'chat_locked',
   BAD_TARGET: 'bad_target',
