@@ -1033,3 +1033,40 @@ body {
   padding: 14px 16px; font: inherit; font-size: 1.15rem; text-align: center;
 }
 .guess-input:focus { outline: none; border-color: var(--accent, #fbbf24); }
+
+/* ---------- سهمیهٔ زمانی روزانه ---------- */
+.quota-card { display: flex; flex-direction: column; gap: 8px; }
+.quota-chip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--card, #171e2a); border: 1px solid var(--line, #2a3444);
+  border-radius: 12px; padding: 10px 12px;
+}
+.quota-chip.low { border-color: var(--danger, #f87171); }
+.quota-label { color: var(--muted, #8fa0b8); font-size: 0.88rem; }
+.quota-value { font-weight: 700; font-size: 1.02rem; }
+.quota-warn {
+  width: 100%; color: var(--danger, #f87171);
+  font-size: 0.85rem; font-weight: 600;
+}
+
+/* یادداشت گذرای نوبت (ردّ خودکار به‌خاطر پایان سهمیه) */
+.turn-note {
+  margin: -6px auto 10px; max-width: 720px; text-align: center;
+  color: var(--warn, #fbbf24); font-size: 0.88rem; font-weight: 600;
+}
+
+/* پیام پایان زمان نوبت */
+.timeup-banner {
+  margin: 0 auto 10px; max-width: 720px; text-align: center;
+  background: rgba(251, 191, 36, 0.12); border: 1px solid var(--warn, #fbbf24);
+  color: var(--warn, #fbbf24); border-radius: 12px; padding: 8px 14px;
+  font-weight: 700; font-size: 0.95rem;
+  animation: timeup-pop 0.25s ease-out;
+}
+@keyframes timeup-pop { from { transform: scale(0.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* شمارش معکوس بزرگ نوبت ۱۰ ثانیه‌ای */
+.timer-count { font-weight: 800; font-size: 1.1rem; letter-spacing: 0.5px; }
+
+/* مقدار ثابت در تنظیمات */
+.set-fixed { color: var(--muted, #8fa0b8); font-weight: 600; }
