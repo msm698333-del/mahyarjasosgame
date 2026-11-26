@@ -187,7 +187,15 @@ async function main() {
   const reconnected = await p3b.wait((m) => m.t === 'state' && m.state.players.find((x) => x.id === w3.you.id)?.connected === true);
   ok('بازیکن وصل‌شده connected=true', !!reconnected);
 
-  // ۱۳) گزارش و اخراج
+  // ۱۳) ورود بعد از شروع بازی رد می‌شود — قبل از اخراج، چون حذف بازیکن در حد بحرانی بازی را تمام می‌کند
+  const p4 = new TestClient('p4');
+  await p4.connect(code);
+  p4.send({ t: 'hello', name: 'چهارم', avatar: 1 });
+  const errStarted = await p4.wait((m) => m.t === 'error' && m.code === 'game_started');
+  ok('ورود بعد از شروع رد شد', !!errStarted);
+  p4.ws.close();
+
+  // ۱۴) گزارش و اخراج
   host.send({ t: 'report', targetId: w2.you.id });
   const repState = await host.wait((m) => m.t === 'state' && m.state.hostView?.reports[w2.you.id] === 1);
   ok('گزارش فقط برای میزبان', !!repState);
@@ -195,12 +203,6 @@ async function main() {
   const kickState = await p3b.wait((m) => m.t === 'state' && !m.state.players.find((x) => x.id === w2.you.id));
   ok('اخراج توسط میزبان', !!kickState);
 
-  // ۱۴) ورود بعد از شروع بازی رد می‌شود
-  const p4 = new TestClient('p4');
-  await p4.connect(code);
-  p4.send({ t: 'hello', name: 'چهارم', avatar: 1 });
-  const errStarted = await p4.wait((m) => m.t === 'error' && m.code === 'game_started');
-  ok('ورود بعد از شروع رد شد', !!errStarted);
 
   // ۱۵) کد نامعتبر
   const bad = new TestClient('bad');
