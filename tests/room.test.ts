@@ -164,7 +164,8 @@ describe('RoomSession — جریان کامل بازی', () => {
       msg(session, clients, v, { t: 'vote', targetId: target }, T0);
     }
     if (session.s?.phase === 'spyGuess') {
-      msg(session, clients, spy.id === host.id ? host : (spy.id === p2.id ? p2 : p3), { t: 'spyGuess', locationId: 'mall' }, T0);
+      // حدس با شناسهٔ کلمهٔ فعال از بانک کلمات — درست → برد جاسوس و پایان بازی
+      msg(session, clients, spy.id === host.id ? host : (spy.id === p2.id ? p2 : p3), { t: 'spyGuess', locationId: session.s!.location!.id }, T0);
     }
     expect(session.s?.phase).toBe('ended');
     expect(recordMatch).toHaveBeenCalled();
