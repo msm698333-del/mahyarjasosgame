@@ -7,7 +7,7 @@ import {
   challenge, passTurn, spyGuessWord, normalizeWord
 } from '../shared/engine';
 import { DEFAULT_SETTINGS, ERR, ROUND_RESULT_SECONDS, SPY_WORD_GUESS } from '../shared/types';
-import { LOCATIONS, locationById } from '../shared/locations';
+import { WORDS } from '../shared/wordBank';
 
 let seed = 12345;
 const rng = () => {
@@ -380,8 +380,8 @@ describe('رأی‌گیری و نتیجه', () => {
     const citizens = s.players.filter((p) => !p.role?.isSpy);
     for (const c of citizens) castVote(s, c.id, spy.id, deps());
     castVote(s, spy.id, null, deps());
-    // یک مکان که حتماً غیر از مکان فعلی است
-    const wrong = LOCATIONS.find((l) => l.id !== s.location!.id)!.id;
+    // یک کلمه که حتماً غیر از کلمهٔ فعلی است
+    const wrong = WORDS.find((w) => w.id !== s.location!.id)!.id;
     spyGuess(s, spy.id, wrong, deps());
     expect(s.phase).toBe('ended');
     expect(s.results?.spyWon).toBe(false);
@@ -475,7 +475,7 @@ describe('رأی‌گیری و نتیجه', () => {
     for (const c of citizens) castVote(s, c.id, spy.id, deps());
     castVote(s, spy.id, null, deps());
     expect(s.phase).toBe('spyGuess');
-    const wrong = LOCATIONS.find((l) => l.id !== s.location!.id)!.id;
+    const wrong = WORDS.find((w) => w.id !== s.location!.id)!.id;
     spyGuess(s, spy.id, wrong, deps());
     expect(s.phase).toBe('ended');
     expect(s.results?.spyWon).toBe(false);
@@ -550,8 +550,8 @@ describe('تنظیمات', () => {
 
   it('دستهٔ نامعتبر فیلتر می‌شود', () => {
     const s = mkRoom(3);
-    updateSettings(s, s.hostId, { categories: ['public', 'hacked', 'food'] });
-    expect(s.settings.categories).toEqual(['public', 'food']);
+    updateSettings(s, s.hostId, { categories: ['food', 'hacked', 'drink'] });
+    expect(s.settings.categories).toEqual(['food', 'drink']);
   });
 });
 
@@ -646,23 +646,22 @@ describe('امنیت داده', () => {
     }
   });
 
-  it('مکان انتخابی از دسته‌های فعال می‌آید', () => {
+  it('کلمهٔ انتخابی از دسته‌های فعال بانک کلمات می‌آید', () => {
     const s = mkRoom(6);
-    updateSettings(s, s.hostId, { categories: ['fantasy'] });
+    updateSettings(s, s.hostId, { categories: ['food'] });
     start(s);
-    expect(s.location!.cat).toBe('fantasy');
+    expect(s.location!.cat).toBe('food');
   });
 
-  it('همهٔ مکان‌های بانک نقش کافی و شناسهٔ یکتا دارند', () => {
-    const ids = new Set<string>();
-    for (const l of LOCATIONS) {
-      expect(l.roles.length).toBeGreaterThanOrEqual(6);
-      expect(l.name.length).toBeGreaterThan(1);
-      expect(ids.has(l.id)).toBe(false);
-      ids.add(l.id);
-    }
-    expect(locationById('coffee-shop')).toBeDefined();
-    expect(LOCATIONS.length).toBeGreaterThanOrEqual(70);
+  it('تنظیمات نوبت روی ۱۰ ثانیه قفل است و سختی پذیرفته می‌شود', () => {
+    const s = mkRoom(6);
+    updateSettings(s, s.hostId, { turnSeconds: 60 as never });
+    expect(s.settings.turnSeconds).toBe(10);
+    updateSettings(s, s.hostId, { difficulty: 'hard' });
+    expect(s.settings.difficulty).toBe('hard');
+    // دستهٔ نامعتبر فیلتر می‌شود
+    updateSettings(s, s.hostId, { categories: ['food', 'old-legacy-cat'] });
+    expect(s.settings.categories).toEqual(['food']);
   });
 });
 
